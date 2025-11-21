@@ -1,0 +1,52 @@
+/**
+ * Global Kappa Theta Pi (Phi Chapter) theme override.
+ * Blue + Green branding with modern tech-fraternity energy.
+ */
+
+/* LIGHT MODE */
+:root {
+  /* --- Primary Branding Colors --- */
+
+  /* Primary Blue (Buttons, links, accents) */
+  --ifm-color-primary: #458FFF;
+  --ifm-color-primary-dark: #3C80E6;
+  --ifm-color-primary-darker: #356FCC;
+  --ifm-color-primary-darkest: #2856A0;
+
+  /* Lighter variants */
+  --ifm-color-primary-light: #5A9AFF;
+  --ifm-color-primary-lighter: #74ADFF;
+  --ifm-color-primary-lightest: #A9CDFF;
+
+  /* Secondary / Accent Green */
+  --ktp-accent-green: #19FF19;
+
+  /* Subtle code line highlight (blue tint) */
+  --docusaurus-highlighted-code-line-bg: rgba(69, 143, 255, 0.08);
+
+  --ifm-code-font-size: 94%;
+}
+
+/* DARK MODE */
+[data-theme='dark'] {
+  /* Use darker navy as base tone */
+  --ifm-background-color: #06203B;
+  --ifm-navbar-background-color: #06203B;
+  --ifm-footer-background-color: #04172A;
+
+  /* Primary Blue in dark mode — slightly neon for contrast */
+  --ifm-color-primary: #6FB3FF;
+  --ifm-color-primary-dark: #5A9EFF;
+  --ifm-color-primary-darker: #4A8BE6;
+  --ifm-color-primary-darkest: #3C76C1;
+
+  --ifm-color-primary-light: #8CC4FF;
+  --ifm-color-primary-lighter: #A8D4FF;
+  --ifm-color-primary-lightest: #C6E4FF;
+
+  /* Accent Green (brighter in dark mode) */
+  --ktp-accent-green: #4CFF4C;
+
+  /* Code highlight in dark mode */
+  --docusaurus-highlighted-code-line-bg: rgba(79, 181, 255, 0.15);
+}
