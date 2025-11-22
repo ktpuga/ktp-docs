@@ -1,0 +1,10 @@
+---
+version: "3.9"
+
+services:
+  docs:
+    build: .
+    container_name: ktp-docs
+    restart: always
+    ports:
+      - "3000:3000"   

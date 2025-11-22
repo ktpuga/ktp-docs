@@ -1,0 +1,21 @@
+name: Deploy docs to Kronos
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.KRONOS_DOCS_HOST }}      # e.g. docs.ugaktp.com or 10.0.0.9 (if VPN)
+          username: ${{ secrets.KRONOS_DOCS_USER }}  # e.g. "docs" user
+          key: ${{ secrets.KRONOS_DOCS_SSH_KEY }}    # private key added in repo secrets
+          script: |
+            cd /opt/ktp-docs
+            git pull origin main
+            docker compose up -d --build
