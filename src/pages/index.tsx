@@ -21,7 +21,7 @@ function HomepageHeader() {
           <Link
             className="button button--secondary button--lg"
             to="/docs/intro">
-            Intro to KTP Docs - 5min ⏱️
+            Lost? Start Here
           </Link>
         </div>
       </div>
@@ -30,11 +30,11 @@ function HomepageHeader() {
 }
 
 export default function Home(): ReactNode {
-  const { siteConfig } = useDocusaurusContext();
+  // const { siteConfig } = useDocusaurusContext();
   return (
     <Layout
-      title={`Hello from ${siteConfig.title}`}
-      description="Description will go into a meta tag in <head />">
+      title={`Howdy`}
+      description="Everything KTP Phi Chapter! Publically accessible (for now)">
       <HomepageHeader />
       <main>
         <HomepageFeatures />

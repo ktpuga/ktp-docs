@@ -59,6 +59,7 @@ VE: Datacenter
 | 101 | Ubuntu    | VM            | General-purpose Ubuntu VM (for experiments, testing, future services)             |
 | 102 | immich    | LXC Container | Self-hosted media management for KTP (photos, events, archives)                   |
 | 103 | authentik | LXC Container | Authentication, SSO provider, identity access management                          |
+| 104 | KTP Docs  | LXC Container | Where this document lives!                                                        |
 | 105 | hp2025    | LXC Container | Stephen used this for his [Hackprinceton](https://www.hackprinceton.com/) project |
 | 106 | dokploy   | LXC Container | Deployment engine for internal + external apps (this site, etc.)                  |
 

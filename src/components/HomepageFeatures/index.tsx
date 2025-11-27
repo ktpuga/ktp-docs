@@ -1,56 +1,73 @@
-import type {ReactNode} from 'react';
-import clsx from 'clsx';
 import Heading from '@theme/Heading';
+import clsx from 'clsx';
+import type { ReactNode } from 'react';
 import styles from './styles.module.css';
 
 type FeatureItem = {
   title: string;
-  Svg: React.ComponentType<React.ComponentProps<'svg'>>;
+  Ascii: string;
   description: ReactNode;
 };
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
-    Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
+    title: 'KTP Knowledge Server',
+    Ascii: String.raw`
+┌─────────────────────────┐
+│   KTP KNOWLEDGE SERVER  │
+├─────────────────────────┤
+│ [📄]  Docs               │
+│ [📜]  Governance         │
+│ [⚙️]  Engineering        │
+│ [𝌵]  Rituals            │
+└─────────────────────────┘`,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        Centralized documentation for the Phi Chapter. Everything you need in
+        one place.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
-    Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
+    title: 'Phi Chapter Banner',
+    Ascii: String.raw`
+╔══════════════════════════╗
+║   Κ Θ Π — PHI CHAPTER    ║
+║    Knowledge Tenacity    ║
+║          Passion.        ║
+╚══════════════════════════╝`,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        An ASCII crest representing our identity, history, and professional
+        mission.
       </>
     ),
   },
   {
-    title: 'Powered by React',
-    Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
+    title: 'KTP Terminal Output',
+    Ascii: String.raw`
+> ktp --init
+[ OK ] Docs loaded
+[ OK ] Article Amended
+[ INFO ] Danny lost the 🧀...
+[ WARN ] Low on snacks
+> KTP - Status: We'll survive`,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        A hacker-style terminal aesthetic to reflect our engineering culture.
       </>
     ),
   },
 ];
 
-function Feature({title, Svg, description}: FeatureItem) {
+function Feature({ title, Ascii, description }: FeatureItem) {
   return (
     <div className={clsx('col col--4')}>
       <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
+        <pre className={styles.asciiBlock}>{Ascii}</pre>
       </div>
       <div className="text--center padding-horiz--md">
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
+        {/* <Heading as="h3">{title}</Heading> */}
       </div>
     </div>
   );

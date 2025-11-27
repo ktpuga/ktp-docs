@@ -5,8 +5,8 @@ import { themes as prismThemes } from 'prism-react-renderer';
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: 'Welcome Home',
-  tagline: 'Still under construction!',
+  title: 'Phi Docs',
+  tagline: 'Never back down never what?',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -15,15 +15,15 @@ const config: Config = {
   },
 
   // Set the production url of your site here
-  url: 'https://your-docusaurus-site.example.com',
+  url: 'https://docs.ugaktp.com',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
+  organizationName: 'ktpuga', // Usually your GitHub org/user name.
+  projectName: 'ktp-docs', // Usually your repo name.
 
   onBrokenLinks: 'throw',
 
@@ -44,7 +44,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+            'https://github.com/ktpuga/ktp-docs/tree/main/',
         },
         blog: {
           showReadingTime: true,
@@ -55,7 +55,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+            'https://github.com/ktpuga/ktp-docs/tree/main/',
           // Useful options to enforce blogging best practices
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',
@@ -101,7 +101,7 @@ const config: Config = {
       label: 'Kronos',
         },
         {
-          href: 'https://github.com/facebook/docusaurus',
+          href: 'https://github.com/ktpuga/ktp-docs',
           label: 'GitHub',
           position: 'right',
         },
@@ -111,41 +111,45 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Docs',
+          title: 'Sites',
           items: [
             {
-              label: 'Tutorial',
-              to: '/docs/intro',
+              label: 'KTPGeorgia',
+              href: 'https://ktpgeorgia.com',
+            }, 
+            {
+              label: 'Kronos via Proxmox',
+              href: 'https://proxmox.ugaktp.com'
+            },
+            {
+              label: 'KTPHacks',
+              href: 'https://KTPGeorgia.com/hackathon'
             },
           ],
         },
         {
-          title: 'Community',
+          title: 'Regulation',
           items: [
             {
-              label: 'Stack Overflow',
-              href: 'https://stackoverflow.com/questions/tagged/docusaurus',
+              label: 'KTP Phi Chapter Constitution',
+              href: 'https://drive.google.com/file/d/17LkRqOsNCJVQUKkWTIOs_HaJhmTcSxmc/view',
             },
             {
-              label: 'Discord',
-              href: 'https://discordapp.com/invite/docusaurus',
-            },
-            {
-              label: 'X',
-              href: 'https://x.com/docusaurus',
+              label: 'Code of Conduct',
+              href: 'https://KTPGeorgia.com/code-of-conduct',
             },
           ],
         },
         {
-          title: 'More',
+          title: 'Nationals',
           items: [
             {
-              label: 'Blog',
-              to: '/blog',
+              label: 'KTP.org',
+              href: 'https://www.kappathetapi.org/',
             },
             {
-              label: 'GitHub',
-              href: 'https://github.com/facebook/docusaurus',
+              label: 'Slack',
+              href: 'https://kappa-theta-pi-hq.slack.com/',
             },
           ],
         },
