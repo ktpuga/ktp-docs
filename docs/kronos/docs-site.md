@@ -23,14 +23,25 @@ We use **Docusaurus** to power the docs, which gives us:
 
 ## Deployment 🥀
 
-Right now ts is MANUALLY being rebuilt every time there is a commit. I (Ryan) go in and pull the changes in the console from the proxmox web interface (container 104) titled **docs**.
+This site is **automatically rebuilt and redeployed every night at midnight** via a scheduled
+[cron job](https://en.wikipedia.org/wiki/Cron) on the Proxmox host.
 
-Then I have to like, docker compose down and then docker build and stuff, then i gotta do the classic:
+The job performs the following steps:
 
-```bash
-docker compose up -d
-```
+1. Pulls the latest changes from the Git repository
+2. Rebuilds the Docusaurus static site inside Docker
+3. Recreates the running container with the updated build
 
-But like, I am going to make a [cron job](https://en.wikipedia.org/wiki/Cron) so this happens automagically, trust!
+As a result, any merged changes to the repo will be reflected on **docs.ugaktp.com** without manual intervention.
 
-See [Intro to KTP Docs](../intro.md) for more info!
+(Previously, this process was fully manual — involving SSH, `git pull`, and a lot of `docker compose` commands. We do better now.)
+
+## Contributing
+
+If you’re contributing to this site:
+
+- Write Markdown (or MDX)
+- Commit and push your changes
+- Wait for the nightly rebuild ✨
+
+See [Intro to KTP Docs](../intro.md) for more information.
