@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 6
 title: VP of Technical Development
 description: The **primairy** role of the VP of Technical Development is to enhance the technical skills and knowledge of the fraternity in the pursuit of **making our brothers more competitve** for landing internships and jobs at top companies. The **secondary** role of the VP of Technical Development is to facilitate a community that **encourages intellectutal interest and exploration** in the fields of computer science, data science, etc.
 ---
