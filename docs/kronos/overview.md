@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Overview
 
 Kronos is the dedicated Linux server powering the technological backbone of the **Phi Chapter of Kappa Theta Pi** at the University of Georgia.

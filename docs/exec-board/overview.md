@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Overview
 
 The Executive Board of the **Phi Chapter of Kappa Theta Pi** serves as the leadership core of the organization.
