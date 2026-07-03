@@ -1,0 +1,8 @@
+{
+  "label": "Authentik (SSO)",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "description": "Documentation for Authentik — the identity provider powering SSO, user onboarding, and access control for KTP Georgia."
+  }
+}
