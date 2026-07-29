@@ -34,6 +34,30 @@ The one messaging mode that's **not** open to everyone by default: access is che
 
 **Any member of a given chat** can post — this is a real multi-party thread, not a broadcast, so message bubbles show the sender's name (unlike DMs, where it's just "you" vs. "them").
 
+Eboard can set a **chat photo** as the group's avatar.
+
+---
+
+## What a message can carry
+
+Both DMs and group chat messages support the same three things:
+
+- **Attachments** — one file per message, 25MB max. Either text or a file is required; both together is fine. Images go to Immich, everything else to ktp-api's own disk.
+- **Emoji reactions** — hover a message to react. Sending the same emoji twice removes it.
+- **Deletion** — you can always delete your own message. Eboard can delete any message in a conversation they're already part of, as a moderation action.
+
+Two server-side rules that surface as real errors rather than silent failures: message bodies run through a basic profanity filter, and sends are capped at **20 per minute per user**.
+
+---
+
+## Push notifications (iOS)
+
+The iOS app registers an APNs device token with the API, and members can toggle direct-message and event notifications independently.
+
+Worth knowing when debugging: **DM alerts never include the message body**, only that a message arrived. Event alerts fire on create, material update, or cancellation, and only to members who can actually see that event. APNs failures are logged but never fail the underlying send — a push that doesn't arrive does not mean the message failed to send.
+
+There are no web push notifications; this is iOS-only.
+
 ---
 
 ## Starting a conversation from the Directory

@@ -21,13 +21,15 @@ Every member is routed to one portal based on their Authentik group (see [Auth &
 
 `middleware.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet.
 
-Three of the four portals (`/member`, `/admin`, `/alumni`) share a common `PortalShell` component (sidebar nav, dark mode toggle, sign-out) — `/pledge` still uses its own hand-rolled layout, a known inconsistency, not a bug.
+**All four portals** now share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
+
+Each portal is distinguished only by an accent color — blue for `/member`, maroon for `/admin`, amber for `/alumni`, teal for `/pledge`. The underlying components are the same files in every case.
 
 ---
 
 ## Shared features across portals
 
-All four portals get the same core feature set, wired to the same backend (only permissions differ by group):
+The portals share a core feature set wired to the same backend, with permissions differing by group. Two deliberate exceptions: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden), and **`/admin` has no Directory** — eboard uses User Management instead.
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
@@ -35,10 +37,44 @@ All four portals get the same core feature set, wired to the same backend (only 
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
-- **Directory** — browse members, view a profile, start a conversation, optionally book time via their personal Calendly link (`/member` and `/alumni` only — [Profiles & Directory](./profiles-and-directory.md))
+- **Directory** — browse members, view a profile, start a conversation, optionally book time via their personal Calendly link. Available in `/member`, `/alumni`, and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
 - **Settings** — edit your own profile (including profile picture and personal Calendly link), manage your blocked members list, delete your account ([Safety & Moderation](#safety--moderation))
 
-`/admin` additionally gets **User Management** (`/admin/users` — real member data, plus eboard can change a member's group directly from here), **Reports** (`/admin/reports` — the moderation queue, see below), and **Homepage Photo management** (curating the public chapter gallery shown on the actual homepage). Announcement/event/poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`.
+`/admin` additionally gets **User Management** (`/admin/users` — real member data, plus eboard can change a member's group and set exec board titles from here), **Reports** (`/admin/reports` — the moderation queue, see below), **Homepage Photos** (the public chapter gallery), and **iOS Homepage Slideshow** (the in-app slideshow — a separate system from the website gallery). Announcement/event/poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`.
+
+---
+
+## Attendance
+
+Events can opt into QR-code attendance tracking. The flow:
+
+1. Whoever creates the event enables attendance on it.
+2. Eboard or the event's creator opens the **Attendance** tab and displays the generated QR code.
+3. Members scan it while signed in, landing on `/checkin/[eventId]/[token]`, which records them as present.
+4. The organizer can view who checked in and manually correct anyone's status to present, excused, or absent.
+
+The check-in window is the event's own start-to-end time plus a **30-minute grace period** — scanning outside it is rejected, as is a stale or wrong token.
+
+Regular members have no attendance UI beyond the confirmation screen after a scan. The Attendance tab appears only for **chairs** (in `/member`) and **eboard** (in `/admin`). Alumni and pledges don't have it at all.
+
+See [API: Attendance](../api/endpoints.md#attendance) for the endpoints.
+
+---
+
+## Public roster (`/members-list`)
+
+A public "meet the chapter" page — no login required — showing eboard, committee chairs, active members, and alumni with their photos and titles.
+
+It reads the separate public [`GET /roster`](../api/endpoints.md#roster-public) endpoint rather than the authenticated directory, and deliberately exposes far less: no email, phone, major, DOB, or pledge class.
+
+Who does **not** appear:
+
+- **Pledges** — initiated members only
+- **Incomplete profiles**
+- **Test accounts**
+- **Anyone without a profile picture** — deliberate, to encourage members to upload one
+
+That last rule surprises people. If a member asks why they aren't on the public roster, a missing profile picture is the first thing to check.
 
 ---
 
@@ -57,7 +93,7 @@ Added to support real content moderation and the iOS app's App Store review requ
 
 ## Committees
 
-DB-only membership, not a new Authentik group per committee — see [API: Committees](../api/overview.md#committees--committee_members-tables) for why. One shared page (not a new portal), added to all four portals:
+DB-only membership, not a new Authentik group per committee — see [API: Committees](../api/overview.md#committees--committee_members-tables) for why. One shared page (not a new portal), available in `/member`, `/admin`, and `/alumni`. **Pledges don't get it** — the `/pledge/committees` route doesn't exist.
 
 - **Anyone**: browse committees and member counts, join or leave any committee themselves.
 - **Eboard**: create/delete committees, promote or demote a member to **chair**.

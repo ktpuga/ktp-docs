@@ -78,6 +78,8 @@ PostgreSQL database: `ugaktp_db` on LXC 118 (`10.0.0.54:5432`)
 | `profile_picture_asset_id` | `TEXT` | Immich asset ID |
 | `calendly_url` | `TEXT` | Personal Calendly link (1-on-1 booking, e.g. coffee chats) — separate from the event-level `calendly_url` below, which is for group booking |
 | `member_group` | `TEXT` | One of: `active`, `pledge`, `eboard`, `chair`, `alumni` |
+| `exec_title` | `TEXT` | Free-text eboard position ("President", "VP of Finance"). Display-only — not validated against `member_group`, though only ever shown for eboard |
+| `is_test_account` | `BOOLEAN` | Excludes the row from the public `/roster`. Set manually; there's no UI for it |
 | `profile_complete` | `BOOLEAN DEFAULT FALSE` | |
 | `deleted_at` | `TIMESTAMPTZ` | Set by self-service `DELETE /users/me` (anonymize, not hard-delete — see below). `NULL` for every active member |
 | `created_at` | `TIMESTAMPTZ` | |
@@ -167,11 +169,33 @@ Gained several columns beyond the original bare title/date/location shape:
 |--------|-------|
 | `location` | Plain text |
 | `audience` | `TEXT[]`, same shape/semantics as `announcements.audience` above — `NULL`/empty = public |
-| `committee_id` | Scopes the event to one committee's members instead of (not combined with) `audience` |
+| `committee_ids` | `INTEGER[]` — scopes the event to one *or more* committees' members instead of (not combined with) `audience` |
 | `calendly_url` | Optional group booking/RSVP link — distinct from a user's personal `calendly_url` on their profile |
 | `created_by` | → `users`. Needed because non-eboard users (committee chairs) can create events too, to check *which* committee they're allowed to scope one to |
+| `requires_attendance` | Opt-in per event. Turning it on generates `attendance_token` the first time |
+| `attendance_token` | Random, generated once and never regenerated. Never returned by the events endpoints — only by `GET /events/:id/attendance/code` |
 
-**Permission logic** (`eventsController.checkEventPermission`): eboard can set any `audience`/`committee_id` combination; a committee chair can only scope to a committee they chair, and can't set `audience`; anyone else is forbidden. `title`/`start_date`/`end_date` are validated server-side before touching the DB.
+:::warning Events and announcements scope to committees differently
+`events.committee_ids` is an **array** — one event can belong to several committees. `announcements.committee_id` is a **single nullable ID**. They're not symmetrical; don't assume one shape when querying across both.
+:::
+
+**Permission logic** (`eventsController.checkEventPermission`): eboard can set any `audience`/`committeeIds` combination; a committee chair can only scope to committees they chair — every ID must be one of theirs — and can't set `audience`; anyone else is forbidden. `title`/`start_date`/`end_date` are validated server-side before touching the DB.
+
+### `event_attendance` table
+
+One row per member per event they have an attendance record for, holding `status` (`present` / `excused` / `absent`), `checked_in_at`, and `marked_by`.
+
+A **null `marked_by` means the member self-checked-in** by scanning the QR code; a populated one means an organizer set the status manually. Self check-in validates the token and that the current time falls inside the event window plus a 30-minute grace period.
+
+### `push_devices` / `notification_preferences` / `notification_delivery_log`
+
+Backs iOS push notifications. `push_devices` holds APNs tokens per user (private to their owner, never returned by any list endpoint); `notification_preferences` holds the two per-user booleans (`direct_messages_enabled`, `events_enabled`, both defaulting true); `notification_delivery_log` records send attempts.
+
+APNs credentials come from environment variables only — the API never reads a `.p8` file from disk. Delivery failures are logged and never fail the underlying message or event write.
+
+### `ios_homepage_slides` table
+
+The in-app slideshow, separate from `homepage_photos` (which is the website's public gallery). Carries title/alt text/subtitle, an optional HTTPS link and label, `is_active`, and optional `starts_at`/`ends_at` for scheduling. A slide is visible only when active and inside its window; max 10 active at once.
 
 ### `polls` / `poll_options` / `poll_votes` tables
 

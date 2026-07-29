@@ -41,11 +41,22 @@ Every member should contribute. It’s simple:
    infra-deployment-guide.md
    ```
 
-3. Add it to the sidebar by editing `sidebars.js` if needed.
+3. Set `sidebar_position` in the frontmatter to control its ordering. **You don't need to touch `sidebars.ts`** — the sidebar is generated automatically from the folder structure, so a new file in an existing directory shows up on its own. Creating a whole new directory adds a new sidebar category.
 4. Write whatever technical, operational, or organizational knowledge you want to preserve.
 5. Commit → push → open a PR → merge.
 
-Your additions will appear automatically at **[https://docs.ugaktp.com](https://docs.ugaktp.com)** once deployed. (This is a work in progress.. TODO: update so this actually works)
+Your additions appear at **[https://docs.ugaktp.com](https://docs.ugaktp.com)** after the next deploy. The site rebuilds and redeploys **automatically every night at midnight**, so a merge during the day goes live that night rather than immediately.
+
+### Where things go
+
+| Directory | Contents |
+|---|---|
+| `docs/api/` | ktp-api — architecture, schema, endpoint reference |
+| `docs/website/` | The Next.js site — portals, messaging, photos/documents, profiles |
+| `docs/authentik/` | SSO, enrollment, invitations, group management |
+| `docs/kronos/` | Server and infrastructure — Proxmox, containers, Dokploy |
+| `docs/operations/` | Runbooks, e.g. member management |
+| `docs/exec-board/` | Exec board role responsibilities |
 
 ---
 

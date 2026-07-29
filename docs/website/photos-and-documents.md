@@ -45,6 +45,20 @@ A completely separate system from the two above — the "Chapter Gallery" sectio
 
 ---
 
-## Why three separate systems instead of one
+## iOS homepage slideshow
 
-Deliberate: different audiences (public vs. members-only), different permission models (curated/eboard-only vs. self-service upload-and-delete-your-own), and different lifecycles. Folding them into one generic "media" table would have meant either exposing member photos publicly by accident, or bolting an audience flag onto every row and checking it on every single read — splitting them by table makes the access boundary the schema itself, not application logic that could have a bug in it.
+A fourth, separate system — the slideshow on the **iOS app's** home screen, managed at `/admin/ios-homepage-slideshow` (eboard only).
+
+:::caution Not the same as the public homepage gallery
+The gallery above is the website's public marketing page and needs no login. This one is in-app and requires authentication. They have separate tables, separate endpoints (`/homepage-photos` vs. `/ios-homepage-photos`), and separate admin pages. The similar names make them easy to confuse.
+:::
+
+Each slide carries a title, alt text, and optionally a subtitle and a link (HTTPS only) with a label. Slides can be **scheduled** with `starts_at`/`ends_at` and toggled active — a slide only shows in the app when it's active and inside its window.
+
+Constraints worth knowing before uploading: **max 10 active slides**, 100MB per upload, JPEG/PNG/HEIC/HEIF/WebP only (no animated images), and source images must be at least **900×600**. The API center-crops around an optional focal point and generates an optimized progressive JPEG, so the stored slide is not the file you uploaded.
+
+---
+
+## Why four separate systems instead of one
+
+Deliberate: different audiences (public vs. members-only vs. in-app), different permission models (curated/eboard-only vs. self-service upload-and-delete-your-own), and different lifecycles. Folding them into one generic "media" table would have meant either exposing member photos publicly by accident, or bolting an audience flag onto every row and checking it on every single read — splitting them by table makes the access boundary the schema itself, not application logic that could have a bug in it.
