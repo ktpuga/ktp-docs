@@ -10,6 +10,25 @@ This is the second half of replacing Calendly. Calendly couldn't do it: it has n
 
 Available in all five portals at `/<portal>/meetings`, plus a **Make a meeting** button on any profile in the directory — the slot Calendly's booking link used to occupy.
 
+## Meeting or event? The committee page offers both
+
+A committee chair can create either, and for a while a single **Schedule Meeting** button on the committee page created an *event* — the wrong one, under the other one's name. The button is now split in two, with the difference stated on the page itself.
+
+| | **New Meeting** | **Schedule Event** |
+|---|---|---|
+| Creates | a row in `meetings` | a row in `events` |
+| Who sees it | only the people invited | everyone on the committee |
+| RSVP | yes — `going` / `not_going` | none |
+| Reaches a personal calendar | only for whoever accepts | for the whole committee |
+| Attendance / QR check-in | no | yes, opt-in (defaults on) |
+| Visible to eboard's unfiltered calendar | no | yes |
+
+Rule of thumb: **a meeting asks, an event announces.** Use a meeting when you need to know who's coming and it's nobody else's business; use an event when it belongs on the calendar and you may want to scan people in.
+
+Both buttons show for a committee's chair and for eboard, matching `checkEventPermission` — eboard may schedule for any committee, a chair only for one they chair.
+
+Opening **New Meeting** from a committee page passes `presetCommittee` to `NewMeetingModal`: that committee is locked in as the invitee list (a chip, not the usual picker — choosing a *different* committee from inside one committee's page would be a surprise), while the individual picker stays open for adding a guest. The audience selector is hidden entirely in this mode.
+
 ## Why meetings are not rows in `events`
 
 This was the obvious design, and it's wrong for one decisive reason.
@@ -18,7 +37,20 @@ Putting them in `events` would have made the calendar, the ICS feed and push tar
 
 In their own tables, privacy is structural: nothing reads `meetings` except through a participant check, so there is no unfiltered view to forget about. It also keeps a new feature away from `eventModel.findAllForUser` — the query that has already caused one production outage.
 
-The cost is that the calendar and the ICS feed merge two sources. That's a small, explicit price paid in two known places.
+The cost is that the calendar and the ICS feed each merge two sources. Both places pay it:
+
+| Surface | Where the merge happens |
+|---|---|
+| Subscribed calendar (Apple/Google) | `calendarFeedController.getFeed` |
+| Portal **Calendar** tab | `EventsCalendar.jsx`, via `loadCalendarItems()` |
+
+Both read `GET /meetings/calendar` → `meetingModel.findForCalendar`, so "what's on my calendar" has exactly one definition. The frontend deliberately does **not** filter `GET /meetings` itself — that returns declined and unanswered meetings too, and restating the rule in JSX would let it drift.
+
+:::danger Meetings must be flagged in the merged list
+Meeting ids and event ids both start at 1, and the calendar's delete button calls `deleteEvent(id)` against `/events/:id`. An unguarded Delete on meeting 4 would destroy the unrelated **event** 4.
+
+`asCalendarEntry` therefore sets `isMeeting: true`, namespaces the id, and leaves `createdBy` undefined, and both `canDelete` checks in `EventsCalendar` refuse meetings outright. Meetings are cancelled by their organizer from the Meetings tab, never deleted from the calendar.
+:::
 
 :::note UID namespacing
 Meetings and events both have ids starting at 1, so the feed prefixes meeting ids (`ktp-event-meeting-4@…`). Without that, meeting 4 and event 4 would be the same entry to a calendar client and one would silently overwrite the other.

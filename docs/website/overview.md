@@ -44,7 +44,7 @@ The portals share a core feature set wired to the same backend, with permissions
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
-- **Committees** — browse committees and member counts; join/leave any committee yourself; eboard creates committees and promotes/demotes chairs; a chair can schedule a meeting scoped to their own committee (shows on the calendar for everyone in it)
+- **Committees** — browse committees and member counts; join/leave any committee yourself; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
@@ -110,7 +110,7 @@ DB-only membership, not a new Authentik group per committee — see [API: Commit
 
 - **Anyone**: browse committees and member counts, join or leave any committee themselves.
 - **Eboard**: create/delete committees, promote or demote a member to **chair**.
-- **A committee's chair**: schedule a meeting scoped to their own committee — shows on the calendar of everyone in that committee.
+- **A committee's chair** (and eboard, for any committee): two separate buttons — **New Meeting** creates a private RSVP request for the committee; **Schedule Event** creates a calendar entry for everyone in it, with QR attendance on by default. [Which one to use](./meetings.md#meeting-or-event-the-committee-page-offers-both).
 
 Every committee automatically gets its own linked Group Chat (see [Messaging](./messaging.md#group-chats)) — joining/leaving the committee joins/leaves the chat too.
 
