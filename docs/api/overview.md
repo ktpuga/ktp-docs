@@ -76,7 +76,6 @@ PostgreSQL database: `ugaktp_db` on LXC 118 (`10.0.0.54:5432`)
 | `linkedin_url` | `TEXT` | |
 | `pledge_class` | `TEXT` | e.g. "Alpha", "Beta" |
 | `profile_picture_asset_id` | `TEXT` | Immich asset ID |
-| `calendly_url` | `TEXT` | Personal Calendly link (1-on-1 booking, e.g. coffee chats) — separate from the event-level `calendly_url` below, which is for group booking |
 | `member_group` | `TEXT` | One of: `active`, `pledge`, `eboard`, `chair`, `alumni` |
 | `exec_title` | `TEXT` | Free-text eboard position ("President", "VP of Finance"). Display-only — not validated against `member_group`, though only ever shown for eboard |
 | `is_test_account` | `BOOLEAN` | Excludes the row from the public `/roster`. Set manually; there's no UI for it |
@@ -170,7 +169,6 @@ Gained several columns beyond the original bare title/date/location shape:
 | `location` | Plain text |
 | `audience` | `TEXT[]`, same shape/semantics as `announcements.audience` above — `NULL`/empty = public |
 | `committee_ids` | `INTEGER[]` — scopes the event to one *or more* committees' members instead of (not combined with) `audience` |
-| `calendly_url` | Optional group booking/RSVP link — distinct from a user's personal `calendly_url` on their profile |
 | `created_by` | → `users`. Needed because non-eboard users (committee chairs) can create events too, to check *which* committee they're allowed to scope one to |
 | `requires_attendance` | Opt-in per event. Turning it on generates `attendance_token` the first time |
 | `attendance_token` | Random, generated once and never regenerated. Never returned by the events endpoints — only by `GET /events/:id/attendance/code` |

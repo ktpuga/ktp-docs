@@ -18,12 +18,23 @@ Every member is routed to one portal based on their Authentik group (see [Auth &
 | `chair`, `active` | `/member` |
 | `alumni` | `/alumni` |
 | `pledge` | `/pledge` |
+| `rush` | `/rushee` — see [Rush Portal](./rush-portal.md) |
 
 `middleware.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet.
 
-**All four portals** now share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
+**All five portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
 
-Each portal is distinguished only by an accent color — blue for `/member`, maroon for `/admin`, amber for `/alumni`, teal for `/pledge`. The underlying components are the same files in every case.
+### Accent colors
+
+The portals are one visual family rather than four colour-coded ones: `/member`, `/pledge` and `/rushee` all render the same blue, `/alumni` keeps amber, and `/admin` is the only portal whose colour is a **user preference** — eboard picks red or blue from Settings, stored per-browser under the `ktp-admin-accent` key.
+
+Because Admin's colour is no longer fixed, it can't be a hardcoded constant. `PortalAccentProvider` (in `components/portal/PortalAccentContext.jsx`) publishes the resolved palette from `PortalShell`, and any component at any depth reads it with `useAccentPalette()`. Admin-only components — Analytics, User Management, Announcements, Rush Signup, Rush Announcements, Homepage Photos, iOS Slideshow, Moderation — all use the hook, so an Admin page follows the toggle rather than staying maroon.
+
+Two things deliberately stay hardcoded and should not be converted: **member-group identity colours** (the maroon chip that means "eboard" in the directory, charts and group chats) and **destructive/danger styling**. Those carry meaning independent of which portal you're in.
+
+:::note
+`accent` doubles as the key into `PortalShell`'s `NAV_GROUPING` map, so it selects the sidebar contents as well as the colour. Repointing a portal's `accent` to share another's palette empties its sidebar — recolour the palette entry instead.
+:::
 
 ---
 
@@ -33,12 +44,14 @@ The portals share a core feature set wired to the same backend, with permissions
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
-- **Committees** — browse committees and member counts; join/leave any committee yourself; eboard creates committees and promotes/demotes chairs; a chair can schedule a meeting scoped to their own committee (shows on the calendar, optionally with a Calendly link for RSVP/sign-up)
+- **Committees** — browse committees and member counts; join/leave any committee yourself; eboard creates committees and promotes/demotes chairs; a chair can schedule a meeting scoped to their own committee (shows on the calendar for everyone in it)
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
-- **Directory** — browse members, view a profile, start a conversation, optionally book time via their personal Calendly link. Available in `/member`, `/alumni`, and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
-- **Settings** — edit your own profile (including profile picture and personal Calendly link), manage your blocked members list, delete your account ([Safety & Moderation](#safety--moderation))
+- **Directory** — browse members, view a profile, start a conversation, request a meeting. Available in `/member`, `/alumni`, and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
+- **Meetings** — request time with a member or a group; they accept or decline, and it lands on both calendars ([Meetings](./meetings.md))
+- **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))
+- **Settings** — edit your own profile (including profile picture, UGA and personal email, and an About Me), subscribe your calendar, manage your blocked members list, delete your account ([Safety & Moderation](#safety--moderation))
 
 `/admin` additionally gets **User Management** (`/admin/users` — real member data, plus eboard can change a member's group and set exec board titles from here), **Reports** (`/admin/reports` — the moderation queue, see below), **Homepage Photos** (the public chapter gallery), and **iOS Homepage Slideshow** (the in-app slideshow — a separate system from the website gallery). Announcement/event/poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`.
 
@@ -97,7 +110,7 @@ DB-only membership, not a new Authentik group per committee — see [API: Commit
 
 - **Anyone**: browse committees and member counts, join or leave any committee themselves.
 - **Eboard**: create/delete committees, promote or demote a member to **chair**.
-- **A committee's chair**: schedule a meeting scoped to their own committee — shows on everyone's calendar who's in that committee, with an optional Calendly link for RSVP or slot booking.
+- **A committee's chair**: schedule a meeting scoped to their own committee — shows on the calendar of everyone in that committee.
 
 Every committee automatically gets its own linked Group Chat (see [Messaging](./messaging.md#group-chats)) — joining/leaving the committee joins/leaves the chat too.
 

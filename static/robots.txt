@@ -1,0 +1,12 @@
+# Internal chapter engineering documentation. Not for indexing.
+#
+# The site is already behind an OAuth proxy, so a crawler shouldn't reach it at
+# all — this is defence in depth for the case where it briefly does. Paired
+# with `noIndex: true` in docusaurus.config.ts, which emits a robots meta tag
+# on every page for crawlers that fetch HTML without reading robots.txt.
+#
+# Everything under static/ is copied to the build root, so this is served at
+# https://docs.ugaktp.com/robots.txt.
+
+User-agent: *
+Disallow: /

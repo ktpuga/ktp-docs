@@ -36,6 +36,36 @@ The one messaging mode that's **not** open to everyone by default: access is che
 
 Eboard can set a **chat photo** as the group's avatar.
 
+### Membership is derived, not a stored roster
+
+A chat's members are the explicitly-added rows in `group_chat_members` **UNION** everyone whose *current* `member_group` is in the chat's `audience` **UNION** everyone in one of its `committee_ids`.
+
+Evaluated at read time on purpose. Before this, a chat's roster was a frozen list of ids expanded from a group at creation time, so promoting a pledge to active left them in the pledge chat forever and never added them to the actives chat, and somebody had to notice and fix it by hand. Deriving membership means a role change moves them automatically.
+
+Audience and committees are **additive** to individual members rather than a replacement, which is what makes "everyone in eboard, plus these two chairs" expressible. `audience IS NULL` means explicit membership only, so every chat created before this keeps working untouched.
+
+:::warning One predicate, or the boundaries disagree
+`membershipPredicate()` in `groupChatModel.js` generates the SQL, and **every** caller uses it: `isMember` (the authorization check behind reading, sending, reacting and deleting), `findForUser` (the chat list) and `countUnread`. A disagreement between them is either a chat you can see but can't open, or one you can open but shouldn't be in.
+
+`findForUser` had to be rewritten to drive from `group_chats` instead of joining from `group_chat_members` — an audience member has no row in that table, so the old join would have hidden every audience-based chat from the list while `isMember` happily let them in.
+
+`findMembers` is the inverse ("who is in this chat") and is also the source of **push recipients** for a group message, so notifications can't drift from membership.
+:::
+
+`active` implies `chair` and `eboard`, matching `eventModel.findRecipientIds`: those are exclusive `member_group` values in Authentik but are still active members for targeting purposes.
+
+**The `is_auto` flag.** `findMembers` returns `is_auto`, true when someone qualifies through the audience or a committee and would therefore still be a member with their explicit row deleted. The UI shows an "auto" label rather than a Remove button for them, because `DELETE FROM group_chat_members` would remove no row and report success while they stayed in the chat. `DELETE /group-chats/:id/members/:userId` returns **409** with an explanation as the backstop for a direct API call.
+
+**Editing it.** `PATCH /group-chats/:id/audience` (eboard only) changes which groups and committees a chat follows. It takes effect immediately for everyone, because membership is derived at read time — nothing is backfilled into `group_chat_members`, and anyone who no longer matches drops out on their next request. Explicitly-added individuals are left alone: narrowing an audience must not evict a guest who was deliberately invited.
+
+This replaced an "Add by group" control that expanded a group into individual rows. That was a snapshot — it captured who was in the group at that moment and never updated, which is the exact problem audiences exist to solve.
+
+The **Eboard chat is excluded** (409). Its membership is already reconciled from the `eboard` Authentik group on every login, so an audience would be a second, competing source of truth for the same question.
+
+:::note The roster must refetch when the audience changes
+Membership is derived, so the member list in the UI keys on the audience as well as the chat id. Keying on the chat id alone left the old roster on screen until you closed and reopened the chat, which reads as "saving didn't work".
+:::
+
 ---
 
 ## What a message can carry

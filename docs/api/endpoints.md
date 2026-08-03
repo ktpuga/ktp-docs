@@ -214,7 +214,6 @@ Returns events visible to the caller: public ones (no `audience`/`committee_id` 
   "location": "Boyd GSRC",
   "audience": ["active", "chair"],
   "committeeIds": [],
-  "calendlyUrl": null,
   "requiresAttendance": false
 }
 ```
@@ -402,6 +401,16 @@ Public. Streams the photo/video.
 
 **Eboard only.** `{ "ids": [3, 1, 2] }` — sets `display_order` to match array position.
 
+### `PUT /homepage-photos/:id`
+
+**Eboard only.** Edits `title` / `caption` in place: `{ "title": "...", "caption": "..." }`. Before this existed, fixing a typo meant deleting the item and re-uploading the file.
+
+An omitted key is left alone; an explicit `null` or `""` clears that field. The asset and `media_type` are immutable — re-register to change those.
+
+:::note Route order matters here
+`/reorder` is registered **above** `/:id`. Express matches in registration order, so flipping them makes the parameterised route swallow `/reorder` and attempt to edit a photo whose id is the string `reorder`.
+:::
+
 ### `DELETE /homepage-photos/:id`
 
 **Eboard only.** Only unlists the photo from the gallery — does **not** delete the underlying Immich asset, since a registered asset might be reused elsewhere.
@@ -560,7 +569,7 @@ Sender, or eboard within a chat they belong to.
 
 ### `PUT /group-chats/:id/photo`
 
-**Eboard only.** Multipart, field `file` (image, 10MB max) — the chat's avatar.
+**Eboard only.** Multipart, field `file` — the chat's avatar. Shares the profile-picture uploader, so it accepts the same formats up to **25MB** and is likewise **normalized to a resized JPEG** on upload (see [`PUT /users/me/profile-picture`](#put-usersmeprofile-picture)). `GET .../photo/media` streams the original asset back, so the conversion is what keeps a phone-camera upload from rendering broken outside Safari.
 
 ### `GET /group-chats/:id/photo/media`
 
@@ -660,6 +669,14 @@ Reads are open to any authenticated member; writes are eboard-only. A slide is "
 
 Visible slides in display order, as `{ "slides": [...] }`.
 
+Eboard callers can pass **`?include_hidden=true`** to also get inactive, scheduled and expired slides.
+
+:::warning Don't make the full set the default
+The iOS app calls this same endpoint for the real slideshow, and the route is behind plain `requireAuth` — not `requireGroup("eboard")`. Returning everything by default would feed deactivated and expired slides straight into the app. The flag is additionally gated on the caller being eboard.
+
+This was a real bug: without the flag the admin UI only ever received currently-live slides, so deactivating a slide made it disappear from the one screen capable of reactivating it, and scheduling a slide for next week made it vanish on save.
+:::
+
 ### `GET /ios-homepage-photos/:id/media`
 
 Streams a visible slide. Eboard can additionally fetch inactive/scheduled ones. Supports `ETag`/`If-None-Match`.
@@ -676,15 +693,36 @@ Streams a visible slide. Eboard can additionally fetch inactive/scheduled ones. 
 
 **Eboard only.** Partial metadata update.
 
+### `PUT /ios-homepage-photos/:id/image`
+
+**Eboard only.** Replaces the picture on an existing slide while keeping its metadata, schedule and position. Multipart, field `file`, plus optional `focal_x`/`focal_y` so the crop can be re-chosen at the same time. Runs the same processing pipeline as a create.
+
+The old Immich asset is deleted **only after** the row already points at the new one — a failure there leaves an orphaned asset rather than a live slide with no image. The `updated_at` trigger bumps the ETag `GET .../media` serves, so clients don't keep showing the previous picture for the rest of its hour-long cache.
+
 ### `PUT /ios-homepage-photos/reorder`
 
 **Eboard only.** `{ "ids": ["1", "2", "3"] }`.
 
 ### `DELETE /ios-homepage-photos/:id`
 
-**Eboard only.** Deletes the slide and its generated asset.
+**Eboard only.** Deletes the slide and the generated 1500×1000 derivative.
 
-**Constraints:** max 10 active slides; uploads capped at 100MB; JPEG/PNG/HEIC/HEIF/WebP only (no animated images); source images must be at least 900×600. The API center-crops around `focal_x`/`focal_y` (each 0–1) and emits an optimized progressive JPEG for iOS.
+If the slide came from `/register`, the shared-album original is recorded in `source_immich_asset_id` and is **not** touched. This is the opposite of `DELETE /homepage-photos/:id`, which unlists but keeps everything — worth being precise about in UI copy, since "this permanently deletes the image" would wrongly imply a library original is about to be destroyed.
+
+**Constraints:** max 10 active slides; uploads capped at 100MB; JPEG/PNG/HEIC/HEIF/WebP only (no animated images); source images must be at least 900×600.
+
+:::note The crop is focal-point based, not a freehand rectangle
+`services/iosSlideshowImage.js` extracts the largest possible 3:2 region **centred on the focal point**:
+
+```
+cropWidth  = min(W, H * 1.5)
+cropHeight = min(H, W / 1.5)
+left = clamp(W * focal_x - cropWidth / 2)
+top  = clamp(H * focal_y - cropHeight / 2)
+```
+
+So a source wider than 3:2 is cropped at full height and slides horizontally; a taller one is full width and slides vertically. Any client preview must reproduce this against the **source** dimensions — rendering the image into a container already forced to 3:2 shows a crop the server will never produce.
+:::
 
 ---
 
@@ -726,9 +764,18 @@ If this breaks again, `docker logs worker` on the Authentik host (not this API's
 | `401` | Missing or invalid Bearer token |
 | `403` | Authenticated but not authorized (wrong group) |
 | `404` | Resource not found |
+| `413` | Upload exceeds that route's size limit |
+| `415` | Unsupported file type, or a file that isn't a decodable image |
+| `429` | Rate limited (message sends, 20/minute/user) |
 | `500` | Internal server error |
 
 All error responses use the format:
 ```json
 { "message": "Error description" }
 ```
+
+Upload errors additionally carry a machine-readable `code` (`upload_too_large`, `unsupported_media_type`, `unexpected_file_field`).
+
+:::note `message` is the only key clients read
+The website extracts `err.message` and nothing else (`lib/portal-api.js`). An endpoint returning `{ "error": "..." }` will have its text silently replaced by a generic fallback — this was a real bug on the slideshow routes. Every upload router now goes through the shared `uploadErrorHandler` in `middleware/upload.js`, which emits `message` and quotes the route's real limit from `LIMITS_MB` rather than a hardcoded string.
+:::
