@@ -93,3 +93,16 @@ There are no web push notifications; this is iOS-only.
 ## Starting a conversation from the Directory
 
 The Member Directory's profile view has a **Message** button that jumps straight to a DM thread with that person (`/member/messages?with=<id>`, or the equivalent path for whichever portal you're in) — see [Profiles & Directory](./profiles-and-directory.md).
+
+## Who is hidden from member lists
+
+Both the **group chat member list** (`groupChatModel.findMembers`) and the **DM conversation list** (`messageModel.findConversations`) exclude:
+
+- **Test accounts** (`is_test_account = true`) — matching the directory and the public roster, which already filtered them in five places. This is display-only: a test account can still be auto-matched into a group chat by audience or committee targeting, it just doesn't appear in the list real members read. You could never *start* a new DM with one anyway, since the picker is backed by `/members`, which already excluded them.
+- **Soft-deleted members** (`deleted_at IS NOT NULL`).
+
+:::note Found by testing, not by reading
+`findConversations` had never filtered `deleted_at`, so a member who deleted their account kept appearing in everyone's DM list indefinitely — every other surface already excluded them. It surfaced only when the test-account filter was verified against a real database with a deleted user in the fixture.
+:::
+
+The member **count** shown in a group chat header is derived from the member list on the client (`members.length`), so it follows these filters automatically rather than being a separate query that could drift.

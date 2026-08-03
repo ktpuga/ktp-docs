@@ -78,7 +78,7 @@ PostgreSQL database: `ugaktp_db` on LXC 118 (`10.0.0.54:5432`)
 | `profile_picture_asset_id` | `TEXT` | Immich asset ID |
 | `member_group` | `TEXT` | One of: `active`, `pledge`, `eboard`, `chair`, `alumni` |
 | `exec_title` | `TEXT` | Free-text eboard position ("President", "VP of Finance"). Display-only — not validated against `member_group`, though only ever shown for eboard |
-| `is_test_account` | `BOOLEAN` | Excludes the row from the public `/roster`. Set manually; there's no UI for it |
+| `is_test_account` | `BOOLEAN` | Hides the row from the public `/roster`, the member directory, **group chat member lists, and the DM conversation list**. Set manually; there's no UI for it |
 | `profile_complete` | `BOOLEAN DEFAULT FALSE` | |
 | `deleted_at` | `TIMESTAMPTZ` | Set by self-service `DELETE /users/me` (anonymize, not hard-delete — see below). `NULL` for every active member |
 | `created_at` | `TIMESTAMPTZ` | |
