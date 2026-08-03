@@ -67,7 +67,23 @@ See [Rush Signup](./rush-signup.md).
 
 ## Rushees in the member directory
 
-Rushees get their own section in the directory, visible to **eboard, chair and active only**. Alumni and pledges have no role in rush, so they don't see the section — and because `memberModel.findAll` filters in SQL on a flag derived from the *caller's* group, those rows never reach their browser at all. `findById` applies the same rule and returns 404 rather than 403, since whether an id belongs to a rushee is itself the thing being withheld.
+Rushees appear in two places: a section in the main directory, and a dedicated **Rushees** tab.
+
+Visible to **every member group** (`RUSH_VISIBLE_TO` in `membersController`). This started narrower — eboard/chair/active only — and was widened 2026-08-03: pledges are around during rush and often help run it, and alumni ask who's coming through. The filtering is in SQL on a flag derived from the *caller's* group, so for anyone not admitted those rows never reach the browser at all. `findById` applies the same rule and returns 404 rather than 403, since whether an id belongs to a rushee is itself the thing being withheld.
+
+### The Rushees tab appears and disappears on its own
+
+`GET /members/rush-count` returns `{ count }`, and each portal layout shows the tab only when it's above zero — so it's there during rush and gone the rest of the year with no toggle to remember.
+
+It returns **0 rather than 403** for anyone who may not see rushees, so a layout needs no permission branch: "no rushees" and "not allowed" collapse into the same answer. `getRushCount` also swallows its own errors, because this runs on every page of every portal and a backend hiccup must hide a tab, not break the sidebar.
+
+The page is `MemberDirectory` with `onlyGroup="rush"`, not a second directory — same profile modal, About Me, search and sort, nothing extra to keep in sync.
+
+:::warning GROUP_ORDER must match roleGroups.js — this has now bitten twice
+`MemberDirectory` bucketed rushees into **Active** because its `GROUP_ORDER` had no `rush`. The identical omission in `UserManagementPage`'s own `GROUP_ORDER` then showed every rushee to eboard as **"unassigned"** — `normalizeGroup()` falls back to that for anything not in the list.
+
+Both are fixed. Any role added to `ktp-api/constants/roleGroups.js` must be added to *both* lists, or it silently mislabels rather than erroring.
+:::
 
 Rushees expose the same contact details as members — eboard needs to reach them about interviews and bids, which is the point of having them listed at all. The asymmetry is the other way round: `GET /members/leadership` gives *rushees* a deliberately narrower view of members, since they signed up through a public QR code and haven't joined anything yet.
 
