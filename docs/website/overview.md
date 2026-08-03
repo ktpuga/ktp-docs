@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Overview
 
-The **member portal** (`uga-ktp-website`, [ugaktp.com](https://ugaktp.com)) is a Next.js 15 app (App Router, Tailwind, shadcn/ui) that serves both the public marketing site and the logged-in member portals. It talks to `ktp-api` for all data — see [API Overview](../api/overview.md) for the backend side of everything described here.
+The **member portal** (`uga-ktp-website`, [ugaktp.com](https://ugaktp.com)) is a Next.js 16 app (App Router, Turbopack, Tailwind, shadcn/ui) that serves both the public marketing site and the logged-in member portals. It talks to `ktp-api` for all data — see [API Overview](../api/overview.md) for the backend side of everything described here.
 
 ---
 
@@ -20,7 +20,7 @@ Every member is routed to one portal based on their Authentik group (see [Auth &
 | `pledge` | `/pledge` |
 | `rush` | `/rushee` — see [Rush Portal](./rush-portal.md) |
 
-`middleware.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet.
+`proxy.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet. (This file was `middleware.ts` until the [Next.js 16 migration](./nextjs-16-migration.md) renamed it; the logic is unchanged.)
 
 **All five portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
 

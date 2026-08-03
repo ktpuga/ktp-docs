@@ -9,7 +9,7 @@ The fifth portal, for prospective members during rush. Lives at **`/rushee`**.
 :::danger Not `/rush`
 `/rush` is the **public** rush marketing page — countdown timer, FAQ, schedule — linked from the homepage, code-of-conduct and members-list. Putting a portal `layout.jsx` there wraps that public page in the authenticated shell and breaks it for anyone not signed in.
 
-The portal is `/rushee`. The middleware matcher covers `/rushee` and deliberately **not** `/rush`.
+The portal is `/rushee`. The `proxy.ts` matcher covers `/rushee` and deliberately **not** `/rush`.
 :::
 
 ## Why it exists
@@ -79,7 +79,7 @@ Before this section existed, `MemberDirectory`'s grouping did `GROUP_ORDER.inclu
 
 ## The public "How Rush Works" page
 
-`/rush/how-it-works` explains the process to people who don't have an account yet. It's **public** — `/rush*` is deliberately excluded from the middleware matcher, and only `/rushee` (the portal) is gated. It shares the visual language of `/rush` so the two read as one site.
+`/rush/how-it-works` explains the process to people who don't have an account yet. It's **public** — `/rush*` is deliberately excluded from the `proxy.ts` matcher, and only `/rushee` (the portal) is gated. It shares the visual language of `/rush` so the two read as one site.
 
 The four steps live in `RUSH_STEPS` in `app/rush/rush-content.js`, separated from the page layout so the copy can be reworded each semester without touching JSX:
 
