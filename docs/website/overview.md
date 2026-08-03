@@ -33,7 +33,7 @@ Because Admin's colour is no longer fixed, it can't be a hardcoded constant. `Po
 Two things deliberately stay hardcoded and should not be converted: **member-group identity colours** (the maroon chip that means "eboard" in the directory, charts and group chats) and **destructive/danger styling**. Those carry meaning independent of which portal you're in.
 
 :::note
-`accent` doubles as the key into `PortalShell`'s `NAV_GROUPING` map, so it selects the sidebar contents as well as the colour. Repointing a portal's `accent` to share another's palette empties its sidebar — recolour the palette entry instead.
+`accent` used to double as the key into `PortalShell`'s `NAV_GROUPING` map, so it selected the sidebar contents *and* the home href as well as the colour — repointing it emptied the sidebar. That coupling is gone: each layout now owns its own grouped `nav` and passes `homeHref` explicitly, and `accent` means only "which palette". Palettes live in one place, `PALETTES` in `components/portal/PortalAccentContext.jsx`.
 :::
 
 ---
