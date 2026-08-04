@@ -128,3 +128,13 @@ Blocking cuts both ways here as it does in messaging, otherwise a meeting invite
 Gated on `RUSH_ACCESSIBLE_GROUPS` — rushees can use meetings, with *who* they may invite narrowed in the controller.
 
 Counter-proposing a different time isn't built. RSVPing no and setting up your own covers it for now.
+
+## Deleting a meeting
+
+`DELETE /meetings/:id` — **organizer only, and only once the meeting is over or already cancelled.**
+
+That date rule is deliberate. Cancelling a future meeting leaves everyone a record it was called off and pulls it from their calendar subscription. Deleting it makes it vanish with no trace, so someone who had it in Apple or Google Calendar just finds an appointment they can no longer explain. **Cancel means "it's not happening"; delete is for tidying up afterwards.** The two buttons are therefore never both offered on a live meeting — you cancel first, and it becomes deletable.
+
+A hard delete: `meeting_invitees` has `ON DELETE CASCADE`, so invitee rows go with it. No soft-delete column, because `meetings` is already invisible to non-participants (every read goes through `IS_PARTICIPANT`) and a `deleted_at` would only add a filter every future query has to remember. No push notification, unlike cancel — there is nothing actionable in "a meeting you already attended was tidied out of a list".
+
+Cancelled meetings also file under **Past** regardless of their date, so a cancelled future meeting no longer sits in Upcoming looking like something to turn up to.
