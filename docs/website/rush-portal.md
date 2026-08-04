@@ -130,3 +130,8 @@ Testing the scalar `users.member_group` is safe in the push query even though `f
 - `RushDashboard` is its own component — `PortalDashboard` fetches members and photos in a `Promise.all`, both closed to rush, so the first 403 would reject the batch and error the page
 - **The `Promise.all` trap recurs.** `PollsPage` fetched `getPolls()` and `getCommittees()` in one `Promise.all`; `/api/committees` is gated on `SHARED_ALBUM_GROUPS`, so for a rushee that 403 discarded the polls too and the tab rendered permanently empty with no error. Any fan-out that mixes a rush-accessible endpoint with a member-only one must isolate the failure (`.catch(() => [])` per call, or `Promise.allSettled`). Grep for `Promise.all` before adding a tab to this portal
 - **No Attendance tab.** `AttendancePage` lists events you can *manage*, so it renders empty for a rushee. Check-in is the QR code, which opens `/checkin/[eventId]/[token]` outside the portal
+- **No Meetings tab.** Replaced by [Interviews](./interviews.md) at `/rushee/interviews`. `/meetings` is gated on `SHARED_ALBUM_GROUPS`, so the API refuses rush tokens outright — this is the one portal without it
+
+:::info The Promise.all trap does not apply to the calendar
+`EventsCalendar.loadCalendarItems` fans out to events, meetings **and** interviews. `/meetings/calendar` 403s for a rushee, which under a bare `Promise.all` would blank the whole rush calendar — exactly the `PollsPage` failure above. Each of the two extra calls already carries its own `.catch(() => [])`, so a 403 degrades to an empty list instead of taking the chapter events with it. Keep that per-call catch when adding a fourth source.
+:::

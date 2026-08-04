@@ -32,6 +32,20 @@ The feed calls `eventModel.findAllForUser`, the **same** function the portal and
 
 A rushee's feed therefore contains rush-targeted events and nothing else, for exactly the same reason their portal calendar does. `test/calendarFeed.test.js` asserts this against a real database, including that internal event titles don't appear anywhere in the rendered file.
 
+### Three sources, one rule each
+
+`getFeed` merges chapter events with two tables that deliberately live outside `events`:
+
+| Source | Function | On your calendar when |
+|---|---|---|
+| Events | `eventModel.findAllForUser` | its audience includes you |
+| [Meetings](./meetings.md) | `meetingModel.findForCalendar` | not cancelled, and you organised it or RSVP'd `going` |
+| [Interviews](./interviews.md) | `interviewModel.findForCalendar` | you booked the slot |
+
+Each `findForCalendar` already restricts to what belongs on that person's calendar, so **no further filtering happens in the controller** — and the portal's Calendar tab calls the same endpoints, so "what's on my calendar" has exactly one definition per source rather than one in SQL and a second in JSX.
+
+Ids from all three tables start at 1, so each non-event source is prefixed into its own UID namespace (`ktp-event-meeting-4@…`, `ktp-event-interview-4@…`). The test asserts the merged UID set is collision-free; without it, meeting 4 and event 4 would be the same entry to a calendar client and one would silently overwrite the other.
+
 :::warning Group derivation
 The feed has no bearer token, so it rebuilds the caller's groups from the stored `member_group` and runs them through `expandImpliedGroups` — the same function `middleware/auth.js` applies to a normal request. That function is exported for this reason rather than duplicated.
 

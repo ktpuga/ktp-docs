@@ -8,7 +8,11 @@ Any member can set up a meeting with specific people, a whole member group, or a
 
 This is the second half of replacing Calendly. Calendly couldn't do it: it has no approval step at all. You publish open availability, someone grabs a slot, it's auto-confirmed. There is no "request, then accept", and every member would have needed their own account.
 
-Available in all five portals at `/<portal>/meetings`, plus a **Make a meeting** button on any profile in the directory — the slot Calendly's booking link used to occupy.
+Available in four of the five portals at `/<portal>/meetings` — member, pledge, alumni and admin — plus a **Make a meeting** button on any profile in the directory, the slot Calendly's booking link used to occupy.
+
+:::info Not the rush portal
+Rushees had meetings until interview scheduling replaced them. `/rushee/meetings` is gone and the API refuses rush tokens on `/meetings` entirely. See [Interviews](./interviews.md).
+:::
 
 ## Meeting or event? The committee page offers both
 
@@ -37,7 +41,7 @@ Putting them in `events` would have made the calendar, the ICS feed and push tar
 
 In their own tables, privacy is structural: nothing reads `meetings` except through a participant check, so there is no unfiltered view to forget about. It also keeps a new feature away from `eventModel.findAllForUser` — the query that has already caused one production outage.
 
-The cost is that the calendar and the ICS feed each merge two sources. Both places pay it:
+The cost is that the calendar and the ICS feed each merge multiple sources — now three, since [interviews](./interviews.md) made the same call. Both places pay it:
 
 | Surface | Where the merge happens |
 |---|---|
@@ -46,14 +50,16 @@ The cost is that the calendar and the ICS feed each merge two sources. Both plac
 
 Both read `GET /meetings/calendar` → `meetingModel.findForCalendar`, so "what's on my calendar" has exactly one definition. The frontend deliberately does **not** filter `GET /meetings` itself — that returns declined and unanswered meetings too, and restating the rule in JSX would let it drift.
 
-:::danger Meetings must be flagged in the merged list
-Meeting ids and event ids both start at 1, and the calendar's delete button calls `deleteEvent(id)` against `/events/:id`. An unguarded Delete on meeting 4 would destroy the unrelated **event** 4.
+:::danger Anything merged in must be flagged
+Meeting, interview and event ids **all** start at 1, and the calendar's delete button calls `deleteEvent(id)` against `/events/:id`. An unguarded Delete on meeting 4 would destroy the unrelated **event** 4.
 
-`asCalendarEntry` therefore sets `isMeeting: true`, namespaces the id, and leaves `createdBy` undefined, and both `canDelete` checks in `EventsCalendar` refuse meetings outright. Meetings are cancelled by their organizer from the Meetings tab, never deleted from the calendar.
+`asCalendarEntry` sets `isMeeting: true` and `asInterviewEntry` sets `isInterview: true`; both namespace the id and leave `createdBy` undefined, and `canDeleteEvent` refuses either outright. Meetings are cancelled by their organizer from the Meetings tab; interviews are released from the Interviews tab. Neither is ever deleted from the calendar.
+
+**When adding a fourth source, the flag is not optional.** `canDeleteEvent` fails *open* — anything it doesn't recognise gets a Delete button pointed at `/events/:id`.
 :::
 
 :::note UID namespacing
-Meetings and events both have ids starting at 1, so the feed prefixes meeting ids (`ktp-event-meeting-4@…`). Without that, meeting 4 and event 4 would be the same entry to a calendar client and one would silently overwrite the other.
+All three sources have ids starting at 1, so the feed prefixes them (`ktp-event-meeting-4@…`, `ktp-event-interview-4@…`). Without that, meeting 4 and event 4 would be the same entry to a calendar client and one would silently overwrite the other. `calendarFeed.test.js` asserts the UID set is collision-free.
 :::
 
 ## The meeting is scheduled; attendees RSVP
@@ -84,7 +90,7 @@ Cancelling removes it from everyone's calendar at once, since the status check c
 
 Members can invite a whole member group or committee instead of picking people one at a time, using the same `AudienceSelect` as announcements.
 
-**Who may:** eboard, chair, active and alumni — `MAY_BULK_INVITE` in `meetingsController`. **Pledges and rushees can still make meetings, but must pick individuals.** That constant is deliberately not derived from `SHARED_ALBUM_GROUPS`, which answers "is this a real member" and includes pledges; this is the narrower question of who is established enough to summon a slice of the chapter.
+**Who may:** eboard, chair, active and alumni — `MAY_BULK_INVITE` in `meetingsController`. **Pledges can still make meetings, but must pick individuals.** That constant is deliberately not derived from `SHARED_ALBUM_GROUPS`, which answers "is this a real member" and includes pledges; this is the narrower question of who is established enough to summon a slice of the chapter.
 
 `expandInvitees` resolves the selection to user ids at creation time:
 
@@ -112,9 +118,21 @@ The **organizer is never an invitee of their own meeting**: they have nothing to
 
 ## Who can invite whom
 
-Rushees may only invite **eboard and chairs**, mirroring the DM restriction in `messagesController` exactly and for the same reason: rush accounts are self-created by strangers, the directory is closed to them precisely so they can't pick members out of it, and an invitee id is just a value in a request body.
-
 Blocking cuts both ways here as it does in messaging, otherwise a meeting invite is a way to put text in front of someone who blocked you. How a block is *handled* depends on how the person got invited — see the note above on named vs expanded invitees.
+
+### Rushees are excluded at three layers
+
+Meetings were open to rush on the reasoning that a rushee booking time with an eboard member is a real rush-week use case. It is — but meetings were the wrong *shape* for it, and the surface is now closed to them:
+
+| Layer | Mechanism |
+|---|---|
+| Route | `routes/meetings.js` is gated on `SHARED_ALBUM_GROUPS`, which excludes `rush` |
+| Model | `expandInvitees` filters `member_group IS DISTINCT FROM 'rush'` |
+| UI | The member directory is closed to rushees, and `/rushee/meetings` no longer exists |
+
+`RUSH_MAY_MEET` in `meetingsController` — the old "rushees may only invite eboard and chairs" rule — is now **unreachable** and deliberately kept rather than deleted. It is the innermost layer: if the route gate is ever widened back to `RUSH_ACCESSIBLE_GROUPS`, it is what stops that from also handing rushees the ability to invite arbitrary members. Deleting it would make that widening silently unsafe.
+
+Why the shape was wrong: a rushee proposing an arbitrary time and summoning named leadership inverts who is running rush, and the actual use case — final interviews after speed dating — is eboard publishing fixed times that candidates claim. A claimed slot is *gone*, rather than being a request somebody has to decline. See [Interviews](./interviews.md).
 
 ## Endpoints
 
@@ -125,7 +143,7 @@ Blocking cuts both ways here as it does in messaging, otherwise a meeting invite
 | `POST` | `/meetings/:id/respond` | `{ response: 'going' \| 'not_going' }` |
 | `POST` | `/meetings/:id/cancel` | Organizer only |
 
-Gated on `RUSH_ACCESSIBLE_GROUPS` — rushees can use meetings, with *who* they may invite narrowed in the controller.
+Gated on `SHARED_ALBUM_GROUPS` — members only. Rushees get [interview slot signup](./interviews.md) instead.
 
 Counter-proposing a different time isn't built. RSVPing no and setting up your own covers it for now.
 
