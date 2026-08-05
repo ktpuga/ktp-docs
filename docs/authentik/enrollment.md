@@ -96,7 +96,7 @@ Required groups:
 | `chair` | /member |
 | `active` | /member |
 | `pledge` | /pledge |
-| `alumni` | /alumni |
+| `alumni` | /member |
 | `admin` | (system only) |
 
 Group names are **case-sensitive** and must match exactly what's used in the invitation's custom attributes JSON and the website middleware.

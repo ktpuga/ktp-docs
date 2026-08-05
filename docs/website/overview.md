@@ -15,18 +15,27 @@ Every member is routed to one portal based on their Authentik group (see [Auth &
 | Group | Portal |
 |-------|--------|
 | `eboard` | `/admin` |
-| `chair`, `active` | `/member` |
-| `alumni` | `/alumni` |
+| `chair`, `active`, `alumni` | `/member` |
 | `pledge` | `/pledge` |
 | `rush` | `/rushee` — see [Rush Portal](./rush-portal.md) |
 
 `proxy.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet. (This file was `middleware.ts` until the [Next.js 16 migration](./nextjs-16-migration.md) renamed it; the logic is unchanged.)
 
-**All five portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
+**All four portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
+
+:::note `/alumni` was deleted — alumni share `/member` (2026-08-05)
+It was a copy of the member portal in amber. Every route wrapped the **same** shared component with a different `theme` prop and slightly different copy; the only structural difference was that it had no Attendance tab, which is chair-only anyway.
+
+It bought nothing, because `ktp-api` never distinguished the two: `alumni` has always been in `SHARED_ALBUM_GROUPS`, so an alumnus could already reach everything `/member` renders. What the duplicate did buy was a second place for every portal bug to hide — and it did, repeatedly (see the `GROUP_ORDER` and `Promise.all` traps elsewhere in these docs).
+
+`/alumni` and `/alumni/:path*` now redirect to the `/member` equivalent, for bookmarks and links in past emails. The redirects are **temporary (307), not permanent** — a 308 is cached by browsers indefinitely, so if an alumni-only portal is ever wanted back, everyone who followed one would keep landing on `/member` with no way to clear it.
+
+Alumni are still labelled **Alumni** in the sidebar: `PortalShell`'s `GROUP_PRIORITY` resolves the badge from the user's group, not from which portal they're in.
+:::
 
 ### Accent colors
 
-The portals are one visual family rather than four colour-coded ones: `/member`, `/pledge` and `/rushee` all render the same blue, `/alumni` keeps amber, and `/admin` is the only portal whose colour is a **user preference** — eboard picks red or blue from Settings, stored per-browser under the `ktp-admin-accent` key.
+The portals are one visual family rather than colour-coded ones: `/member`, `/pledge` and `/rushee` all render the same blue, and `/admin` is the only portal whose colour is a **user preference** — eboard picks red or blue from Settings, stored per-browser under the `ktp-admin-accent` key. The `amber` palette that `/alumni` used still exists in `PALETTES` and is simply unused.
 
 Because Admin's colour is no longer fixed, it can't be a hardcoded constant. `PortalAccentProvider` (in `components/portal/PortalAccentContext.jsx`) publishes the resolved palette from `PortalShell`, and any component at any depth reads it with `useAccentPalette()`. Admin-only components — Analytics, User Management, Announcements, Rush Signup, Rush Announcements, Homepage Photos, iOS Slideshow, Moderation — all use the hook, so an Admin page follows the toggle rather than staying maroon.
 
@@ -48,7 +57,7 @@ The portals share a core feature set wired to the same backend, with permissions
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
-- **Directory** — browse members, view a profile, start a conversation, request a meeting. Available in `/member`, `/alumni`, and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
+- **Directory** — browse members, view a profile, start a conversation, request a meeting. Available in `/member` and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
 - **Meetings** — request time with a member or a group; they accept or decline, and it lands on both calendars ([Meetings](./meetings.md))
 - **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))
 - **Settings** — edit your own profile (including profile picture, UGA and personal email, and an About Me), subscribe your calendar, manage your blocked members list, delete your account ([Safety & Moderation](#safety--moderation))
@@ -106,7 +115,7 @@ Added to support real content moderation and the iOS app's App Store review requ
 
 ## Committees
 
-DB-only membership, not a new Authentik group per committee — see [API: Committees](../api/overview.md#committees--committee_members-tables) for why. One shared page (not a new portal), available in `/member`, `/admin`, and `/alumni`. **Pledges don't get it** — the `/pledge/committees` route doesn't exist.
+DB-only membership, not a new Authentik group per committee — see [API: Committees](../api/overview.md#committees--committee_members-tables) for why. One shared page (not a new portal), available in `/member` and `/admin`. **Pledges don't get it** — the `/pledge/committees` route doesn't exist.
 
 - **Anyone**: browse committees and member counts, join or leave any committee themselves.
 - **Eboard**: create/delete committees, promote or demote a member to **chair**.

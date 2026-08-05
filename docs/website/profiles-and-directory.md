@@ -22,12 +22,22 @@ A profile picture is also what gets a member onto the [public roster](./overview
 
 ## Member Directory
 
-`/member/directory`, `/alumni/directory`, and `/pledge/directory` list chapter members (name, major, pledge class, graduation, group badge). `/admin` has no Directory — eboard uses User Management instead.
+:::note LinkedIn buttons (2026-08-05)
+Members with a LinkedIn URL get a link under their name in three places: the directory row, the directory profile modal, and their card on the public `/members-list` roster (where `ProfileCard` already had a LinkedIn slot that nothing was filling).
+
+`linkedin_url` was added to `memberModel`'s `findAll`, `findById` and `findPublicRoster` projections — it had been stored since the beginning but selected by none of them.
+
+**It is the first profile field to become an `href`**, which is why it arrived with validation on both sides: `services/urls.js` in the API (see [API: Input validation](../api/overview.md#input-validation)) and `linkedinHref()` in `lib/portal-format.js` at render. A value that fails either rule renders no button rather than a broken or hostile link.
+
+On the public roster this is the only contact-ish field — still no email, phone, major or pledge class. A LinkedIn profile is already a public professional page, and that roster exists to be found.
+:::
+
+`/member/directory` and `/pledge/directory` list chapter members (name, major, pledge class, graduation, group badge). `/admin` has no Directory — eboard uses User Management instead.
 
 Clicking any member opens a **profile view** — a modal with their photo, group, major, pledge class, graduation date, and email, plus:
 
 - **Email** — a `mailto:` link, if they have an email on file
-- **Message** — jumps straight into a direct-message conversation with them, in whichever portal you're currently in (`/member/messages?with=<id>`, `/alumni/messages?with=<id>`, etc. — the target portal is derived from the current URL, not hardcoded, so this works the same from any portal that has a Directory)
+- **Message** — jumps straight into a direct-message conversation with them, in whichever portal you're currently in (`/member/messages?with=<id>`, `/pledge/messages?with=<id>`, etc. — the target portal is derived from the current URL, not hardcoded, so this works the same from any portal that has a Directory)
 - **Request a meeting** — proposes a time through the [meetings](./meetings.md) flow; they accept or decline
 - **Report** — flags the profile itself to eboard's review queue (see [Safety & Moderation](./overview.md#safety--moderation))
 - **Block** — stops them from messaging you and hides their messages from your own view, self-service, no eboard approval needed

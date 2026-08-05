@@ -17,6 +17,16 @@ Two ways photos are organized:
 
 **Deleting photos:** the uploader can always delete their own. **Eboard can delete any photo in any album, including the Shared Album** — a real moderation power, not scoped to albums a given eboard member personally created (that narrower rule was the original behavior; broadened so eboard can act on a reported photo regardless of which album it's in — see [Safety & Moderation](./overview.md#safety--moderation)). Every photo card also has a **Report** button for flagging it to eboard's review queue without deleting it yourself.
 
+:::warning Delete the row first, clean up Immich second
+`deletePhoto` removes the `photos` row, returns 204, and *then* deletes the Immich asset best-effort.
+
+It used to do the opposite, and that made a corrupted photo **permanently undeletable from the portal**: `immich.deleteAsset` throws on any non-OK response, so an asset that was corrupt or already gone failed the whole request and the row survived every retry. The only way out was a manual `DELETE` against the database.
+
+The row is the only thing the app renders from, so removing it is what "delete" means to a member. The tradeoff is that a genuine Immich failure now leaves an orphaned asset — invisible wasted storage — instead of a loud 502, so it's logged with the asset id to stay findable.
+
+`documentsController.deleteDocument` already had this ordering (row, then best-effort `fs.unlink`); photos were the one outlier. `test/photoDelete.test.js` covers it, and was mutation-checked against the old ordering.
+:::
+
 Both images and video are supported (250MB upload limit). Photos and videos are served through `PhotoMedia`, a small shared component that picks `<img>` vs `<video controls>` by the photo's `media_type` — reused everywhere a photo/video renders (album grids, the dashboard's "Recent Photos" preview).
 
 Photos are stored in Immich, but never exposed directly to the browser — ktp-api proxies every request server-side, and the website further proxies through its own `/api/photos/:id/media` route so the Immich API key never reaches the client.
@@ -58,6 +68,19 @@ Restricted rows carry a **Restricted** badge that is always visible rather than 
 `/photos/:id/media`, `/documents/:id/download` and `/documents/:id/preview` each carry their own check — an id is just a number in a URL. Download and preview share one guard function, because identical bytes with a different `Content-Disposition` would otherwise be two chances to get it wrong. Denials return **404, not 403**: a 403 confirms the thing exists.
 
 `parseAudience` rejects unknown group names instead of storing them. A typo like `"eboards"` would save happily and match nobody, making content invisible with no clue why.
+
+The valid set is `SHARED_ALBUM_GROUPS`, which **excludes `rush`** — rushees can never see photos or documents at all, so there is no such thing as a rush-visible album.
+
+:::warning The picker must exclude rush, and creates must return the 400
+This combination produced a **dead "Create Album" button**, fixed 2026-08-04:
+
+1. `VisibilityControl` rendered `AudienceSelect` with no `exclude`, so it offered a **Rushee** pill for content rushees can never see.
+2. Ticking it sent `audience: ['rush']`, which `parseAudience` correctly rejected with a 400.
+3. But `createAlbum` and `createFolder` had no `if (err.status)` branch — only the three `PATCH .../visibility` handlers did — so the 400 surfaced as an opaque **500**. Editing visibility worked; setting it at creation did not.
+4. The modal passed an async `onCreate` straight to `onClick`, so the rejection was unhandled and **nothing rendered at all**.
+
+All four are fixed: the pill is gone (`exclude={['rush']}`), both create paths return the 400, and the create modals show inline errors via `useModalSubmit`. Any new `parseAudience` caller needs that `err.status` branch — the update handlers are the pattern to copy.
+:::
 
 :::danger Never build a params array a branch might not use
 The first attempt at this shipped and took down `/albums` and the Documents root **for eboard only**. `albumModel.findAll` always built `params = [viewer.userId, viewer.groups]`, but for eboard the WHERE clause is empty — so the SQL contained no `$1`/`$2` while two parameters were still supplied, and Postgres rejects that: *"bind message supplies 2 parameters, but prepared statement requires 0"*.

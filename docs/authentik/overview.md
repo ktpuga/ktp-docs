@@ -38,9 +38,13 @@ The website and iOS app both authenticate via the **KTP OIDC application** in Au
 
 > Add the app's development URL (e.g. `http://localhost:3000/api/auth/callback/authentik`) when running locally.
 
-### PKCE
+### PKCE and state checks
 
-PKCE is **disabled** on the website provider config (`checks: ["state"]` in `auth.ts`). PKCE cookies don't survive the Traefik reverse proxy round-trip, causing `InvalidCheck: pkceCodeVerifier` errors in production. State-only check is sufficient.
+Both are **disabled** on the website provider config — `checks: []` in `auth.ts`. PKCE cookies don't survive the Traefik reverse-proxy round-trip, causing `InvalidCheck: pkceCodeVerifier` errors in production; the state cookie was dropped for the same reason.
+
+### `prompt=none`
+
+`/login` sends `prompt=none` on arrival to ask whether the browser already has a session, without Authentik rendering a login form. Anything that changes how this provider handles consent will change that answer — see [Sign-In Flow](../website/sign-in.md).
 
 ---
 
@@ -54,12 +58,19 @@ Authentik groups map directly to portals on the website:
 | `chair` | `/member` | Committee chairs |
 | `active` | `/member` | Active members |
 | `pledge` | `/pledge` | Current pledge class |
-| `alumni` | `/alumni` | Alumni (page not yet built) |
+| `alumni` | `/member` | Alumni — share the member portal; `/alumni` was deleted 2026-08-05 |
+| `rush` | `/rushee` | Prospective members during rush — **not** `/rush`, which is the public page |
 | `admin` | — | System admins, no portal |
 
-**Priority order** (when a user is in multiple groups): `eboard > chair > active > pledge > alumni`
+**Priority order** (when a user is in multiple groups): `eboard > chair > active > alumni > pledge > rush`
 
 The `member_group` stored in the database reflects the highest-priority group at login time.
+
+:::warning Two lists, and they must agree
+The order above lives in `ktp-api/constants/roleGroups.js`; the website's portal routing lives in `lib/home-portal.js`. Adding a group means editing both.
+
+`rush` is last on purpose. Authentik doesn't drop a group automatically, so someone accepted out of rush into a pledge class still carries `rush` — the higher-priority group has to win, or a new member keeps reading as a rushee after being accepted.
+:::
 
 ---
 

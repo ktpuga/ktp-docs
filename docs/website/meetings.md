@@ -86,6 +86,18 @@ Deliberately excluded:
 
 Cancelling removes it from everyone's calendar at once, since the status check comes first.
 
+### A meeting has participants, not an audience
+
+`findForCalendar` also returns **`participants`** — who the meeting is with, *from the caller's point of view*: the invitees if you organised it, the organizer if you were invited. Never yourself.
+
+This exists because the calendar card ran meetings through the same formatter as events, and `formatAudience(null)` returns `'All Members'` — so **every private one-on-one was badged "ALL MEMBERS"**, which is both uninformative and untrue. Meetings and interviews now render a `ParticipantBadge` ("With Ann Adams", "With Ben Brown, Cal Clark +3") and no audience badge at all.
+
+No new disclosure: these are the same names `GET /meetings` already returns, and you can't be on a meeting's calendar row without being a participant.
+
+:::note `CONCAT_WS`, not `||`
+`first_name || ' ' || last_name` yields **NULL** when either side is NULL, so a member with a first name but no last name fell through to `username` — or to nothing. `DISPLAY_NAME` in `meetingModel` uses `COALESCE(preferred_name, NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), username)`, so "Zed" stays "Zed". The same fix applies in `interviewModel`, where the name is baked into an ICS `DESCRIPTION` that phones cache for weeks.
+:::
+
 ## Inviting a group or a committee
 
 Members can invite a whole member group or committee instead of picking people one at a time, using the same `AudienceSelect` as announcements.

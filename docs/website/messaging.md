@@ -44,8 +44,27 @@ Evaluated at read time on purpose. Before this, a chat's roster was a frozen lis
 
 Audience and committees are **additive** to individual members rather than a replacement, which is what makes "everyone in eboard, plus these two chairs" expressible. `audience IS NULL` means explicit membership only, so every chat created before this keeps working untouched.
 
+### Eboard oversight
+
+Eboard reads **every official chapter chat**, whether or not they're a member — `GET /group-chats/all`, surfaced as an "All chapter chats" toggle in the Group Chats tab. Chats they aren't in open **read-only**: they can read and moderate (delete a message), but not post, because a message from someone the members never added is not something eboard should be able to produce. `sendMessage`, `toggleReaction` and `markRead` all still require real membership.
+
+`is_member_created` (migration `1786700000000`) is what the oversight query filters on:
+
+| Value | Meaning | Eboard sees it |
+|---|---|---|
+| `FALSE` | official chapter space — committee chats, audience chats, the Eboard chat | **yes**, always |
+| `TRUE` | a private space between members | **no** — the way in is a report, not a permission |
+
+**Nothing sets it to `TRUE` yet.** Member-created group chats are a planned feature; the column exists now so the oversight query is already correct the day they ship, rather than being retrofitted under a query that assumed every chat was official. `test/groupChatOversight.test.js` covers both halves, including the branch the product can't reach yet.
+
+:::note DMs and meetings are NOT covered by this
+Eboard oversight stops at group chats. Direct messages have no eboard view at all, and [meetings](./meetings.md) remain participant-only — that's the entire reason they live outside `events`. Both were deliberate calls, not gaps.
+:::
+
 :::warning One predicate, or the boundaries disagree
-`membershipPredicate()` in `groupChatModel.js` generates the SQL, and **every** caller uses it: `isMember` (the authorization check behind reading, sending, reacting and deleting), `findForUser` (the chat list) and `countUnread`. A disagreement between them is either a chat you can see but can't open, or one you can open but shouldn't be in.
+`membershipPredicate()` in `groupChatModel.js` generates the SQL, and **every** membership caller uses it: `isMember` (the authorization check behind sending, reacting and marking read), `findForUser` (the chat list) and `countUnread`. A disagreement between them is either a chat you can see but can't open, or one you can open but shouldn't be in.
+
+**`canRead` is deliberately layered on top rather than folded in.** Reads go through `canRead` (member **or** eboard-on-an-official-chat); writes still go through `isMember`. Widening `membershipPredicate` itself to include eboard would have buried their Messages tab under every committee chat and inflated every unread badge, since the same predicate drives the list and the counts.
 
 `findForUser` had to be rewritten to drive from `group_chats` instead of joining from `group_chat_members` — an audience member has no row in that table, so the old join would have hidden every audience-based chat from the list while `isMember` happily let them in.
 

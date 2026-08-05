@@ -67,7 +67,21 @@ See [Rush Signup](./rush-signup.md).
 
 ## Rushees in the member directory
 
-Rushees appear in two places: a section in the main directory, and a dedicated **Rushees** tab.
+Rushees appear in **one** place: the dedicated **Rushees** tab. They were removed from the main directory on 2026-08-04 — a rushee is a prospective member, and mixing them into the chapter roster made "who is actually in this chapter" a question you had to read badges to answer.
+
+:::note The exclusion is in SQL, and it's two conditions
+`memberModel.findAll` only returns rushees when they are **explicitly asked for by group** (`?group=rush`, which the Rushees tab sends):
+
+```js
+if (!includeRush || groupFilter !== "rush") {
+  sql += ` AND member_group IS DISTINCT FROM 'rush'`
+}
+```
+
+`includeRush` remains the *permission* half, derived from the caller's own group. Both must hold — so `?group=rush` without permission returns an empty list rather than a 403, because whether an id belongs to a rushee is itself the thing being withheld.
+
+**This has a non-obvious consequence for messaging.** The New Message picker is sourced from `/members`, so removing rushees from it silently removed leadership's ability to start the interview and bid conversations that leadership↔rushee DMs exist for. `getMessageableMembers` therefore makes a *second* call to `?group=rush` for leadership and merges the results. Anything else sourcing a person-picker from `/members` needs the same treatment.
+:::
 
 Visible to **every member group** (`RUSH_VISIBLE_TO` in `membersController`). This started narrower — eboard/chair/active only — and was widened 2026-08-03: pledges are around during rush and often help run it, and alumni ask who's coming through. The filtering is in SQL on a flag derived from the *caller's* group, so for anyone not admitted those rows never reach the browser at all. `findById` applies the same rule and returns 404 rather than 403, since whether an id belongs to a rushee is itself the thing being withheld.
 
@@ -78,6 +92,8 @@ Visible to **every member group** (`RUSH_VISIBLE_TO` in `membersController`). Th
 It returns **0 rather than 403** for anyone who may not see rushees, so a layout needs no permission branch: "no rushees" and "not allowed" collapse into the same answer. `getRushCount` also swallows its own errors, because this runs on every page of every portal and a backend hiccup must hide a tab, not break the sidebar.
 
 The page is `MemberDirectory` with `onlyGroup="rush"`, not a second directory — same profile modal, About Me, search and sort, nothing extra to keep in sync.
+
+`onlyGroup === 'rush'` also drops the **Pledge Class** column (a rushee has no pledge class — that's what they're rushing for, so the column was a full width of dashes) and changes the footer count from "members in chapter" to "rushees signed up". The section-heading `colSpan` follows the column count, or the heading rule stops short of the table edge.
 
 :::warning GROUP_ORDER must match roleGroups.js — this has now bitten twice
 `MemberDirectory` bucketed rushees into **Active** because its `GROUP_ORDER` had no `rush`. The identical omission in `UserManagementPage`'s own `GROUP_ORDER` then showed every rushee to eboard as **"unassigned"** — `normalizeGroup()` falls back to that for anything not in the list.
@@ -101,13 +117,17 @@ The four steps live in `RUSH_STEPS` in `app/rush/rush-content.js`, separated fro
 
 1. **Make an account** — button on the page or the QR code at an info session, then sign in to the portal
 2. **Come to events and talk to members** — attendance is scanned at each event
-3. **Sign up for interviews** — towards the end of rush
+3. **Sign up for interviews** — the Interviews tab, towards the end of rush
 4. **Check back for an update** — bids arrive as a direct message plus a push notification
+
+It is also linked from **`/login`**, under "Not a member yet?" — see [Sign-In Flow](./sign-in.md#sign-up-for-rush). `/login` deliberately links *here* rather than to the Authentik invitation URL, because this page already handles rush being closed and `/login` would otherwise need to know about it.
 
 The page fetches `getPublicRushSignup()` on mount. When signup is open it shows the signup button; when it's closed it says so plainly and points at `/rush` and Instagram, rather than rendering a dead button. That call never rejects — it resolves to `is_open: false` on any failure, so a backend hiccup hides the button instead of breaking a public page.
 
-:::warning Two things the copy must not promise
-Step 3 says interview signup details are **announced in the portal**. There is no interview-signup feature — writing it as a link would promise something that doesn't exist. Likewise step 4 is worded as an update you'll see, not an automated bid notification: bids are sent by leadership as a direct message, and there is no separate bid system.
+:::warning What the copy must not promise
+Step 3 was reworded once [Interviews](./interviews.md) shipped — it previously said signup details would be *announced*, because no such feature existed. It now describes the Interviews tab, but still has to read correctly **before** eboard publishes a schedule, since the tab isn't there until they do.
+
+Step 4 is deliberately worded as an update you'll see, not an automated bid notification: bids are sent by leadership as a direct message, and there is no separate bid system.
 :::
 
 ## Targeting rushees: the thing that catches people out

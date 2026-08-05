@@ -209,6 +209,41 @@ Same targeting shape as `events`/`announcements` (`audience TEXT[]` + `committee
 
 ---
 
+## Input validation
+
+There is **no validation library** — no zod, joi or express-validator. Every rule is hand-written in the controller that owns the endpoint, and the great majority are *presence* and *permission* checks (`if (!title) return 400`), not *format* checks. Columns are almost all bare `TEXT` with no `CHECK` constraints, so Postgres accepts anything too.
+
+That is mostly fine, because React escapes anything rendered as a text node — a hostile string in someone's name or bio is inert.
+
+:::danger URLs are the exception, and `new URL()` is not a safety check
+An `href` is a different trust context from a text node. `<a href={value}>` carrying `javascript:…` executes in the reader's session.
+
+The trap: **`new URL("javascript:alert(1)")` parses perfectly happily**, because that is a syntactically valid URL. `documentsController.createLink` relied on exactly that — it wrapped `new URL()` in a try/catch and treated "it parsed" as "it's safe", so an eboard member could store a script URL that `PhotoFiles.jsx` then rendered as a clickable link for the whole chapter. Fixed 2026-08-05.
+
+All user-supplied URLs now go through **`services/urls.js`**:
+
+| Helper | Rule |
+|---|---|
+| `normalizeWebUrl(v)` | http(s) only, ≤300 chars, accepts scheme-less input |
+| `normalizeLinkedinUrl(v)` | the above **plus** host must be `linkedin.com` or a real subdomain; a bare handle becomes `https://www.linkedin.com/in/<handle>` |
+
+Two subtleties the tests pin down:
+
+- **The scheme must be judged before parsing.** Prefixing an unknown scheme with `https://` and hoping the parse fails is not a check — `https://file:///etc/passwd` parses cleanly into host `file`, silently mangling the input into a valid-looking URL instead of rejecting it. Opaque schemes are caught by pattern first, hierarchical ones (`file://`, `ftp://`) by the protocol check after.
+- **Host matching is exact-or-subdomain**, never a substring. `evil-linkedin.com` and `linkedin.com.evil.com` must both fail, and a `includes('linkedin.com')` waves both through.
+
+Values are **canonicalised on write**, so what's in the database is already safe; the website's own `linkedinHref()` in `lib/portal-format.js` applies the same rule at render time as a backstop for rows written before this existed.
+
+**If you add any field that becomes an `href`, route it through `services/urls.js`.**
+:::
+
+Two other conventions worth knowing:
+
+- **`about_me` is truncated, not rejected** (600 chars) — losing the tail of a bio beats throwing away someone's whole profile save. `linkedin_url` is the opposite, rejected with a 400, because a mangled URL is a broken link rather than a shorter one.
+- **Audience/visibility values are allowlisted**, not denylisted — `parseAudience` rejects unknown groups rather than storing them.
+
+---
+
 ## Eboard: changing a member's group
 
 `PUT /admin/users/:authentikId/group` (eboard only) lets eboard move a member between groups directly from the website's `/admin/users` page, instead of going into Authentik's own UI. Unlike the webhook above (which reacts to Authentik-side changes after the fact — and got stuck on group-change events not reliably carrying the affected user's pk), this endpoint **drives** Authentik: it already knows the exact user and target group from the request, so it calls Authentik's own REST API (`services/authentikAdmin.js`) to move the user between groups there first, then mirrors the result into `users.member_group` immediately — no waiting for the member's next login. Authentik stays the source of truth throughout.

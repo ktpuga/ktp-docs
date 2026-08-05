@@ -243,19 +243,23 @@ Eboard can delete any event; a non-eboard creator can delete their own.
 
 ## Attendance
 
-QR-code check-in for events that opted in via `requiresAttendance`. Managing attendance follows the same rule as deleting an event: **eboard, or the event's own creator**. Checking yourself in is self-service for any member.
+QR-code check-in for events that opted in via `requiresAttendance`. Managing attendance is **eboard, cabinet (chairs), or the event's own creator** — `MAY_MANAGE_ATTENDANCE` in `attendanceController`. Checking yourself in is self-service for any member.
+
+:::note Cabinet has full access, unlike event creation
+This is deliberately broader than `checkEventPermission`, which restricts a chair to *creating* events scoped to a committee they chair. Attendance is about **running the room**: a chair is usually the person standing at the front, and requiring the creator made the feature unusable whenever an eboard member had made the event on their behalf.
+:::
 
 ### `GET /events/:id/attendance/code`
 
-**Eboard or event creator.** Returns `{ eventId, token }` — encode as a QR pointing at `<site>/checkin/:eventId/:token`. 400s if the event doesn't have attendance enabled.
+**Eboard, cabinet or event creator.** Returns `{ eventId, token }` — encode as a QR pointing at `<site>/checkin/:eventId/:token`. 400s if the event doesn't have attendance enabled.
 
 ### `GET /events/:id/attendance`
 
-**Eboard or event creator.** Everyone with an attendance record for the event, including `checked_in_at` and `marked_by`. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
+**Eboard, cabinet or event creator.** Everyone with an attendance record for the event, including `checked_in_at` and `marked_by`. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
 
 ### `PUT /events/:id/attendance/:userId`
 
-**Eboard or event creator.** Body `{ "status": "present" | "excused" | "absent" }`. Upserts, so it works for someone with no existing record.
+**Eboard, cabinet or event creator.** Body `{ "status": "present" | "excused" | "absent" }`. Upserts, so it works for someone with no existing record.
 
 ### `POST /checkin/:eventId/:token`
 
