@@ -15,7 +15,7 @@ Two ways photos are organized:
 - **Shared Album** — a single general album open to everyone (active, chair, alumni, eboard, pledge). Anyone can upload; the uploader can delete their own photo.
 - **Eboard-created named albums** — e.g. "Spring Retreat 2026." Only eboard can create a new album; anyone in the shared-album groups can browse into one and upload.
 
-**Deleting photos:** the uploader can always delete their own. **Eboard can delete any photo in any album, including the Shared Album** — a real moderation power, not scoped to albums a given eboard member personally created (that narrower rule was the original behavior; broadened so eboard can act on a reported photo regardless of which album it's in — see [Safety & Moderation](./overview.md#safety--moderation)). Every photo card also has a **Report** button for flagging it to eboard's review queue without deleting it yourself.
+**Deleting photos:** the uploader can always delete their own. **Eboard can delete any photo in any album, including the Shared Album** — a real moderation power, not scoped to albums a given eboard member personally created (that narrower rule was the original behavior; broadened so eboard can act on a reported photo regardless of which album it's in — see [Safety & Moderation](./overview.md#safety--moderation)). Every photo card — and the full-size lightbox — also has a **Report** button for flagging it to eboard's review queue without deleting it yourself, and a **Block** button right next to it for blocking the member who uploaded it. Both are hidden on your own uploads.
 
 :::warning Delete the row first, clean up Immich second
 `deletePhoto` removes the `photos` row, returns 204, and *then* deletes the Immich asset best-effort.

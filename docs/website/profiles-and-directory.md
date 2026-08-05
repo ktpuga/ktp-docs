@@ -40,7 +40,7 @@ Clicking any member opens a **profile view** — a modal with their photo, group
 - **Message** — jumps straight into a direct-message conversation with them, in whichever portal you're currently in (`/member/messages?with=<id>`, `/pledge/messages?with=<id>`, etc. — the target portal is derived from the current URL, not hardcoded, so this works the same from any portal that has a Directory)
 - **Request a meeting** — proposes a time through the [meetings](./meetings.md) flow; they accept or decline
 - **Report** — flags the profile itself to eboard's review queue (see [Safety & Moderation](./overview.md#safety--moderation))
-- **Block** — stops them from messaging you and hides their messages from your own view, self-service, no eboard approval needed
+- **Block** — stops them from messaging you and hides their messages from your own view, self-service, no eboard approval needed. The same action is also one click away from any of their messages or photos, as a small button beside that item's Report button
 
 The last two aren't shown on your own profile.
 
