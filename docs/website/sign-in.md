@@ -51,6 +51,33 @@ New OAuth2 providers default to the **provider-scoped** one. It is a trap becaus
 **Verify:** sign out, then open `https://auth.ugaktp.com/` directly. Still signed in ⇒ not fixed. Nothing on our side can detect this — a `refresh_token` is not tied to the browser session — so it will not surface as an error anywhere.
 :::
 
+:::warning Where sign-out lands is an Authentik allow-list, not just our code
+`logoutEverywhere` asks Authentik to return the browser to `${AUTH_URL}/` — the homepage. Authentik honours that **only if the URI matches an entry in the provider's Redirect URIs list exactly**, trailing slash included; it uses that same list for post-logout redirects. A URI that isn't on the list is silently ignored and the person is left parked on `auth.ugaktp.com`.
+
+So the string in `lib/auth-actions.js` and the list in **Applications → Providers → ktpapp → Redirect URIs** are one setting in two places. Change one, change the other:
+
+| Environment | Entry to add (Strict) |
+|---|---|
+| Production | `https://ugaktp.com/` |
+| Local dev | `http://localhost:3000/` |
+
+This is also why the "just signed out" marker is a **cookie** and not a `?signedout=1` query param — the param would have to be allow-listed too, and getting it wrong doesn't degrade gracefully, it strands people on the IdP.
+:::
+
+### Three Authentik settings with "logout" in the name
+
+They are unrelated to each other, and two of them are easy to reach for when the third is the problem:
+
+| Setting | Decides | Ours must be |
+|---|---|---|
+| **Invalidation flow** (on the provider) | whether Authentik's own SSO session actually ends | `default-invalidation-flow` — the provider-scoped one ends only the app session |
+| **Redirect URIs** (on the provider) | where the browser lands afterwards; the same list gates `post_logout_redirect_uri` | must include `https://ugaktp.com/` **as its own entry** — the OAuth callback URLs already there do not cover it under Strict matching |
+| **Backchannel logout URI** | a server-to-server `POST` of a signed `logout_token` from Authentik to the app | **blank** |
+
+The last one is the trap: its help text reads *"Required for OpenID Connect Logout functionality"*, which sounds mandatory. It refers to **backchannel** logout, a different half of the spec from the **RP-initiated** logout we use (browser → `end_session_endpoint` with `id_token_hint` → redirect). Ours needs no backchannel URI, and there is no endpoint in the website that could receive one — pointing it at the homepage just makes Authentik POST logout tokens at a page that answers 405.
+
+Implementing it later would be poor value: backchannel logout exists for apps holding revocable server-side sessions, and ours are stateless JWT cookies. Honouring a logout token would mean a revocation denylist checked on every request, for a case `logoutEverywhere` already covers from the browser.
+
 :::note No `id_token_hint`, no logout
 `logoutEverywhere` skips the round trip entirely when it has no id_token, because end-session without a hint answers `302 → /if/flow/default-authentication-flow/` — the **login** flow. Authentik can't tell whose session to end, so it asks the visitor to sign in first. Following that lands someone who pressed "sign out" on a login form, still signed in, having achieved nothing.
 :::
