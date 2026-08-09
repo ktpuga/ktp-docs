@@ -46,7 +46,43 @@ The custom attribute value is loaded into the enrollment flow's `prompt_data` co
 | 30 | enrollment-user-write | User Write Stage | Writes the new user to Authentik |
 | 100 | enrollment-user-login | User Login Stage | Logs the user in + runs group assignment policy |
 
-> **Important:** The `enrollment-prompt` stage must have **no validation policies** attached. Authentik's default validation policies (password strength, username format, etc.) cause crashes during enrollment and must all be removed from the stage binding.
+> **Important:** The `enrollment-prompt` stage currently has **no validation policies** attached. Authentik's *default* validation policies crashed enrollment and were removed. See [Password requirements](#password-requirements) below — this is fixable, but not by re-attaching what was removed.
+
+### Password requirements
+
+Passwords live entirely in Authentik. ktp-api and the website never see, store, or validate one, so **there is nothing to change in either repo** — this is Authentik admin configuration.
+
+Right now there are effectively **no password requirements at all**: a rushee can enroll with `a`. Fixing that means adding a *Password Policy*, which is not the same object as the default validation policies that were removed.
+
+#### Why the previous attempt crashed
+
+The default policies bound to `enrollment-prompt` included ones that evaluate `request.user` — during enrollment there is no user yet, because `enrollment-user-write` (order 30) hasn't run. They also assumed field names that the custom prompt stage doesn't use. Both surface as `Password Invalid` or a 500 on submit, which is why the fix was to strip them.
+
+A **Password Policy** avoids this. It evaluates the submitted *field value*, not the not-yet-existent user.
+
+#### Setup
+
+1. **Customisation → Policies → Create → Password Policy.** Name it `ktp-password-strength`.
+2. Set the rules. A reasonable baseline for a student org:
+   - Minimum length: `10`
+   - Minimum uppercase: `0`, lowercase: `0`, digits: `0`, symbols: `0`
+   - Error message: *"Password must be at least 10 characters."*
+3. **Set `Password field` to the field name your prompt stage actually uses.** This is the step that silently breaks everything if it's wrong — the policy passes trivially because it's checking a field that doesn't exist. Check it under **Flows → Stages → `enrollment-prompt` → Prompts**; it is usually `password`, but confirm rather than assume.
+4. Bind it to the **prompt stage**, not the flow: **Flows → `ktp-enrollment` → Stage Bindings → `enrollment-prompt` → Policy Bindings → Bind existing policy.**
+
+:::tip Prefer length over character classes
+Composition rules (one uppercase, one symbol) push people toward `Password1!` and are worse than a longer minimum. Length is the requirement that actually helps here.
+:::
+
+:::danger Test with a throwaway invitation before rush opens
+Enrollment breaking is not a bug you find gradually — it breaks *everyone* signing up, during the two weeks of the year when signups matter, and the people hitting it are prospective members with no way to report it to you.
+
+Create a disposable invitation, run the whole flow in a private window, and confirm you can still enroll. Do this **before** rush signup opens, not after. If enrollment breaks, unbind the policy first and diagnose second — `docker logs` on the Authentik container shows the real error, which is usually the wrong field name from step 3.
+:::
+
+#### Existing accounts
+
+A password policy applies at *enrollment and password change*, not retroactively. Members who enrolled with a weak password keep it until they change it. There is no forced-reset flow (it was removed — see [Password Reset for Existing Users](./overview.md#password-reset-for-existing-users)), so tightening this does not lock anyone out.
 
 ### Group Assignment Policy
 
@@ -112,6 +148,10 @@ Group names are **case-sensitive** and must match exactly what's used in the inv
 
 **"Password Invalid" error during enrollment:**
 - Remove all validation policies from the `enrollment-prompt` Prompt Stage binding
+- If you were adding password requirements, unbind the policy first, then check its **Password field** matches the prompt stage's actual field name — see [Password requirements](#password-requirements). A Password Policy is safe here; the default validation policies are not, because they evaluate a user that doesn't exist until order 30
+
+**Signup rejects a valid-looking email:**
+- The UGA address requirement is enforced by **ktp-api**, not Authentik — enrollment itself collects no email. The check is in `services/emails.js` and it accepts `uga.edu` and any subdomain, nothing else. Someone without a UGA address yet cannot finish `/complete-profile`
 
 **User stuck on /complete-profile after submitting:**
 - Check API logs on LXC 119: `docker logs ktp-api`

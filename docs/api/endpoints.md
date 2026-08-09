@@ -68,24 +68,47 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 
 ### `PUT /users/me/profile`
 
-**Auth required.** Saves profile fields and sets `profile_complete = true`. Accepts `multipart/form-data`.
+**Auth required.** Saves profile fields and sets `profile_complete = true`. JSON body — this route has no file upload, so it is **not** multipart; only `/users/me/profile-picture` below is.
 
-**Form fields:**
+**Body fields** — `first_name` and `last_name` are required, the rest optional:
 - `first_name`, `last_name`, `preferred_name`
 - `dob` — date of birth
 - `major`
 - `graduation_date` — string like "Spring 2026" (the form combines semester + year before sending)
 - `phone`
-- `email`
-- `linkedin_url`
+- `email` (the UGA address), `personal_email` — **`email` is ignored for alumni.** The profile form doesn't render a UGA Email input for them, and this route is a whole-row upsert where every absent key becomes `NULL`, so the API preserves the stored value instead of taking it from the payload. That guard is at the write, not in the form, so a hand-written `PUT` carrying `email` won't set one either. See `GET /members` above for why alumni have no UGA address
+- `linkedin_url` — validated and canonicalised on write; a bad value is a `400`
 - `pledge_class`
+- `about_me` — free text, **truncated** to 600 rather than rejected
 
-**Response:**
-```json
-{ "profile_complete": true }
-```
+**Response:** the saved profile row.
 
 After a successful response, the website calls `update({ profile_complete: true })` to update the NextAuth session without a round-trip.
+
+:::note `username` is not in this list
+It is not a field of this endpoint, and `updateProfile` deliberately does not write it — the caller supplies the access token's value, which keeps the *old* name for the rest of the session after a rename. Renames go through `PUT /users/me/username` below.
+:::
+
+---
+
+### `PUT /users/me/username`
+
+**Auth required.** Self-service rename. JSON body `{ "username": "newname" }`.
+
+Writes **Authentik first**, then mirrors into Postgres — Authentik owns login identifiers, so a name rejected as taken leaves both systems untouched, whereas writing ours first would leave the portal showing a username the member cannot log in with.
+
+| Status | Meaning |
+|---|---|
+| `200` | `{ username }` — the stored value |
+| `400` | Fails validation: 3–32 characters of `[a-zA-Z0-9._-]` |
+| `409` | Already taken in Authentik — the member picks another |
+| `502` | We could not complete the write. **Not the member's fault** — most often the service account lacking `Can change User` |
+
+:::warning Needs an Authentik permission that is not granted by default
+See [Authentik: API Tokens / Service Accounts](../authentik/overview.md#api-tokens--service-accounts). Without `Can change User` every rename returns `502`, and that is exactly why the first attempt at this feature was reverted — it reported the resulting 403 as "that username is taken", so the real cause never surfaced.
+:::
+
+Full behaviour, including why it is a separate endpoint from the profile save: [Profiles & Directory → Usernames](../website/profiles-and-directory.md#usernames).
 
 ---
 
@@ -166,7 +189,17 @@ Never touches Authentik — revoking real chapter/SSO access is a separate, eboa
 
 ### `GET /members/:id`
 
-**Auth required.** Returns a single member by `authentik_id`.
+**Auth required.** Returns a single member by `authentik_id`. Same field set and the same alumni rule as `GET /members`.
+
+:::caution `email` is always `null` for alumni
+A UGA address stops working at graduation, so alumni have no UGA email anywhere in the product. `users` carries two columns — `email` (the UGA address) and `personal_email` — and for anyone whose resolved `member_group` is `alumni`, `email` is nulled by the SQL itself in both `findAll` and `findById`.
+
+This is a correctness rule rather than a privacy one. Both the web directory and the iOS card build their mailto as "`email`, else `personal_email`", so a stale UGA address in the payload would silently point the Email button at a dead inbox. Nulling it server-side makes that fallback pick the personal address on its own, and covers the iOS app, which never runs the web components.
+
+**If you are writing a new client:** don't read `email` alone. Fall back to `personal_email`, or an alumnus will render with no contact address at all.
+
+The rule keys off the resolved `member_group`, never the JWT's raw `groups` array — Authentik doesn't drop someone's old group when they graduate. The column keeps its value; this is a read-time mask, not a delete. See the [ktp-api README](https://github.com/ktpuga/ktp-api#alumni-and-the-uga-email) for the matching write-side guard.
+:::
 
 ---
 
@@ -632,6 +665,40 @@ Returns all users in the database.
 `{ "execTitle": "President" }`, or `null`/omitted to clear it. Free-text eboard position.
 
 Purely a display label — it makes no Authentik call and isn't validated against `member_group`, though it's only ever surfaced for eboard members (on the directory and the public roster). Unlike the group change above, this one touches nothing outside ktp-api's own database.
+
+### `PUT /admin/users/:authentikId/profile`
+
+Edits **anyone's** profile. Identical body and identical validation to [`PUT /users/me/profile`](#put-usersmeprofile) — both go through `services/profileFields.js`, deliberately one module rather than two copies, so a rule tightened on the member form can't leave a hole on the route with more authority.
+
+Returns `404` when the id is unknown **or** when the account was anonymized by a deletion request. That second case is the point: `anonymize()` erased that person's PII because they asked, and an admin edit writing names back in would quietly undo it.
+
+Unlike the member's own save, this route does not create a row, does not set `profile_complete`, and does not apply the alumni email guard. See the [ktp-api README](https://github.com/ktpuga/ktp-api#eboard-editing-another-members-profile) for why each of those matters.
+
+:::warning It sets the whole row
+Every field absent from the body is written as `NULL`. The admin UI seeds its form from `GET /admin/users`, which is why that endpoint returns `dob`, `phone`, `personal_email`, `linkedin_url` and `about_me` even though the list doesn't display them. A new editable column has to be added to `PROFILE_FIELDS`, `findAll` and `adminUpdateProfile` in the same change, or it will erase itself the first time eboard saves.
+:::
+
+### `PUT /admin/users/:authentikId/username`
+
+`{ "username": "newname" }` — renames anyone. Writes Authentik first, then mirrors into Postgres, exactly like the self-service rename. `409` if taken, `502` if Authentik couldn't be reached (most often the service account missing `Can change User`).
+
+Separate from the profile route for the same reason the self-service rename is separate: it's the only field that writes to Authentik, and folding it in would sink "that name is taken" into an unrelated bio edit.
+
+### `PUT /admin/users/:authentikId/profile-picture`
+
+Replaces anyone's profile picture. `multipart/form-data`, field name `file` — the only admin route that isn't JSON.
+
+Identical handling to [`PUT /users/me/profile-picture`](#put-usersmeprofile-picture): same 25MB cap, same accepted formats, same server-side re-encode to a resized JPEG. It reuses the member route's multer config, so a rejected upload fails the same way on both.
+
+### `DELETE /admin/users/:authentikId/profile-picture`
+
+Takes down a profile picture; the member's card falls back to their initials.
+
+Only the `profile_picture_asset_id` reference is cleared — the Immich asset is kept, so a contested removal can still be reviewed.
+
+:::note All three are audited
+They're recorded in the [activity log](../website/activity-log.md) by the global middleware, never by a call inside the controller — which is what makes the record impossible to forget. These writes change what a person's own profile says about them, with no notification to them, so the log is the accountability.
+:::
 
 ---
 

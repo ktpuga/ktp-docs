@@ -4,6 +4,37 @@ sidebar_position: 4
 
 # Profiles & Directory
 
+## Usernames
+
+Members change their own username from **Settings**, inline on the header card (`components/profile/UsernameEditor.jsx`). It was eboard-managed until 2026-08-07.
+
+:::warning A username is a login credential, not a profile field
+This is the only thing on the Settings page that writes to **Authentik** as well as our database, because Authentik owns login identifiers — the new name is what the member types to sign in.
+
+The order is fixed: **Authentik first, then Postgres.** A name Authentik rejects as taken leaves both systems untouched; writing ours first would leave the portal showing a username the member cannot actually log in with.
+
+It also needs an Authentik permission that is **not granted by default** — see [Authentik: `Can change User`](../authentik/overview.md#api-tokens--service-accounts). Without it every rename returns `502`. That missing grant is why the first attempt at this feature was reverted.
+:::
+
+It is a **separate endpoint** (`PUT /users/me/username`) and a separate control from the main profile form, rather than another field in it. A rename can fail with something the member has to act on — "that name is taken" — and inside the main form that failure surfaces as a whole-form error on a save that was really about their bio.
+
+Two behaviours that look like bugs and are not:
+
+- **`upsert` re-syncs the username on every login.** That is what stops Postgres drifting from Authentik: an eboard rename made directly in Authentik reaches the portal at next sign-in, and a rename that succeeded in Authentik but failed to mirror repairs itself.
+- **`updateProfile` deliberately does not write `username`.** It receives the value from the access token, which still carries the *old* name for the rest of the session after a rename — so writing it would silently undo the rename the next time the member edited anything else.
+
+Validation (`services/usernames.js`) is deliberately permissive: 3–32 characters of `[a-zA-Z0-9._-]`. Length matters because the portal renders `@name` inside table cells; ASCII-only matters because mixed-script homoglyphs let two visually identical usernames exist in a directory people scan by eye rather than read.
+
+:::warning The server action must return `{ error }`, never throw
+Every failure here is one the member has to read — "that name is taken", "renames are unavailable right now". A **thrown** Server Action error has its message replaced in production by React's generic *"An error occurred in the Server Components render"* (error **#441**), so throwing turns all of them into that one string.
+
+This shipped wrong on the first deploy: the Authentik 403 became a 502, the 502 threw, and the member saw React #441 rendered as the field's error message. `updateUsername` in `lib/portal-api.js` now returns `{ error }`, matching `uploadProfilePicture`. Any new action whose failure is meant to be read by a person needs the same treatment.
+:::
+
+Usernames are **display-only everywhere else** — every lookup, foreign key and permission check uses `authentik_id`, so a rename breaks nothing. The one place it lingers is history: the moderation queue and activity log record `@name` at the time of writing, so a report filed against an old name still shows that name. Renames are themselves recorded in the [activity log](./activity-log.md), since it captures every mutating request.
+
+---
+
 ## Profile pictures
 
 Members upload a profile picture from **Settings** (or during onboarding at `/complete-profile` — both use the same shared `ProfileForm` component). Uploading happens immediately on file select, independent of the rest of the profile form's save button — you don't need to click a separate "Save" to update just your picture.
@@ -36,7 +67,19 @@ On the public roster this is the only contact-ish field — still no email, phon
 
 Clicking any member opens a **profile view** — a modal with their photo, group, major, pledge class, graduation date, and email, plus:
 
-- **Email** — a `mailto:` link, if they have an email on file
+- **Email** — a `mailto:` link, if they have an email on file. Members carry two addresses, **UGA Email** and **Personal Email**; both rows render when both exist, and the button prefers the UGA one
+
+:::note Alumni have no UGA email
+A UGA address stops working at graduation, so alumni don't have one anywhere in the product: the profile form doesn't offer the field (their remaining input is labelled just **Email**), and the API returns `email: null` for them, so the directory shows one address and the button targets it.
+
+Withholding it is a **correctness** fix, not a privacy one. The mailto prefers `email` over `personal_email`, so a stale UGA address left in the payload would silently send mail to a dead inbox.
+
+It's enforced in `memberModel`'s SQL rather than in the component, for the same reason the rushee rules are — filtering a payload client-side is a display choice, not a boundary, and a component-level check would miss the iOS app entirely.
+
+The stored value isn't deleted; it's masked at read time, so an alumnus who was mis-grouped and later corrected still has their address. The matching write-side guard is `preserveEmail` in `userModel.updateProfile`: `PUT /users/me/profile` is a whole-row upsert where absent keys become `NULL`, so without it an alumnus editing their bio would erase the address on file. See [API: `GET /members`](../api/endpoints.md#get-membersid).
+
+The rule keys off the resolved `member_group`, never the raw `groups` array — Authentik doesn't drop someone's old group when they graduate.
+:::
 - **Message** — jumps straight into a direct-message conversation with them, in whichever portal you're currently in (`/member/messages?with=<id>`, `/pledge/messages?with=<id>`, etc. — the target portal is derived from the current URL, not hardcoded, so this works the same from any portal that has a Directory)
 - **Request a meeting** — proposes a time through the [meetings](./meetings.md) flow; they accept or decline
 - **Report** — flags the profile itself to eboard's review queue (see [Safety & Moderation](./overview.md#safety--moderation))
@@ -54,3 +97,21 @@ The last two aren't shown on your own profile.
 - **Exec title** — free text (e.g. "President", "VP of Finance"), shown on the directory and the public roster. Purely a display label: it makes no Authentik call and isn't validated against the member's group, though it's only ever surfaced for eboard.
 
 There is still **no way to remove or deactivate a user from this page** — member removal remains an Authentik-side operation (see [Member Management](../operations/member-management.md)), not something the website UI does.
+
+### Editing someone else's profile
+
+Each row has an **Edit** button opening a modal that can change everything on that person's profile: names, date of birth, major, graduation, both emails, phone, pledge class, LinkedIn, About Me, their username, and their profile picture (replace or remove). The chapter is a private organisation running its own directory, so correcting a member's profile text is ordinary housekeeping — mostly fixing what people typed in the wrong box, and removing the occasional thing that doesn't belong there.
+
+Three parts of the design are deliberate:
+
+- **Username saves on its own button**, separate from the rest of the form. It's the only field that writes to Authentik, and the only one that can fail with something specific ("that name is already taken") that would otherwise be buried inside an unrelated bio edit.
+- **Profile pictures upload on select**, with no separate save step, exactly like the member's own picture field. Same 25MB cap and same server-side re-encode. The stored Immich asset is kept even after a removal, so a contested takedown can still be reviewed.
+- **Anonymized accounts are not editable.** Anyone who used "delete my account" had their PII erased on purpose, and the API returns `404` rather than let an edit write names back into that row.
+
+:::note This is the most powerful write in the app
+It changes what a person's own profile says about them, under their name, with no notification to them. Every one of the three routes is recorded in the [activity log](./activity-log.md) automatically — by the global middleware, not by anything the controller remembers to call. If you're wondering who changed someone's bio, that's where it is.
+:::
+
+The modal is **not** a reuse of the shared `ProfileForm`. That component decides which fields to show by reading the *session* — `isRushee` and `isAlumni` describe whoever is logged in, which here is the eboard member, not the person being edited. It would show the wrong field set and post to the wrong route. The two share what actually matters instead: `buildProfilePayload`, so both send identical bodies, and the API's `services/profileFields.js`, so both are validated by identical rules.
+
+One field differs on purpose: **UGA Email is shown here even for alumni**, though alumni don't see it on their own form and it's masked in the directory. This is the surface for fixing bad stored data, so it shows what's really in the row.

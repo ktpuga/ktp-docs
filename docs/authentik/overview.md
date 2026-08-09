@@ -88,7 +88,7 @@ This mapping must be added to the **KTP OIDC provider's selected Property Mappin
 
 ## API Tokens / Service Accounts
 
-Used when ktp-api needs to call Authentik's own REST API directly, rather than just verifying tokens Authentik issued — currently only for the eboard "change member group" admin action (`services/authentikAdmin.js`, see [API: Eboard — changing a member's group](../api/overview.md#eboard-changing-a-members-group)).
+Used when ktp-api needs to call Authentik's own REST API directly, rather than just verifying tokens Authentik issued — the eboard "change member group" admin action, rush enrollment invitations, and self-service username changes (`services/authentikAdmin.js`, see [API: Eboard — changing a member's group](../api/overview.md#eboard-changing-a-members-group)).
 
 Authentik tokens are always bound to a single Identity (a User) — there's no way to create a token "for a group" directly. The pattern used here:
 
@@ -97,9 +97,17 @@ Authentik tokens are always bound to a single Identity (a User) — there's no w
 3. **Directory → Roles → Create** a Role (e.g. `ktp-api-group-manager`), then assign it to that group.
 4. Grant the Role permissions:
    - **Object-level**, on each of the five role groups individually (`eboard`/`chair`/`active`/`alumni`/`pledge` — go to each group's own Permissions tab → "Assign object permissions to role"): `Add user to group`, `Remove user from group`, `Can view Group`. Scoping this per-object (not globally) means the token can only ever touch these five specific groups, not every group in the instance.
-   - **Global**, on the Role's own "Assigned global permissions" tab (not "Initial Permissions" — that's a different feature, for auto-granting permissions on objects the role's members *create*, not applicable here): `Can view User`. This one has to be global since ktp-api needs to look up any member, including ones who join later — a per-object grant wouldn't cover future users.
+   - **Global**, on the Role's own "Assigned global permissions" tab (not "Initial Permissions" — that's a different feature, for auto-granting permissions on objects the role's members *create*, not applicable here): `Can view User`, and `Can change User` if self-service username changes are enabled (see below). Both have to be global since ktp-api needs to reach any member, including ones who join later — a per-object grant wouldn't cover future users.
 5. Generate the token: **Directory → Tokens and App passwords → Create**, Identity = the service account, **Intent = API Token** (this field matters — other intents get rejected as `Token invalid/expired` even though the token exists and looks otherwise correct).
 6. Copy the token into `AUTHENTIK_API_TOKEN` in ktp-api's `.env`. `docker compose restart` does **not** re-read `.env` — use `docker compose up -d` (recreate) after changing it.
+
+:::warning `Can change User` is required for self-service username changes, and is broad
+`PUT /users/me/username` writes the new name to Authentik before mirroring it into Postgres, via `PATCH /core/users/{pk}/`. Without `Can change User` on the role, Authentik answers **403** and every rename fails.
+
+This is worth granting deliberately rather than by reflex: it lets ktp-api modify **any** user in the instance, not just usernames and not just the caller. The containment is in ktp-api's code, not in the grant — `authentikAdmin.updateUsername` sends only `{ username }`, and the controller only ever resolves the pk of the authenticated caller. If you'd rather not hold that permission, leave it ungranted and the feature simply reports that renames are unavailable.
+
+**The first attempt at this feature was reverted because of exactly this.** The code mapped every Authentik failure onto "that username is taken", so a missing permission looked like a name collision and the real cause never surfaced. It now distinguishes them: `409` means taken, `502` means the API could not complete the write — check `docker logs` for the `[updateUsername] authentik 403` line.
+:::
 
 ---
 
