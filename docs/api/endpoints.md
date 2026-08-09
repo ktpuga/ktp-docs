@@ -288,7 +288,29 @@ This is deliberately broader than `checkEventPermission`, which restricts a chai
 
 ### `GET /events/:id/attendance`
 
-**Eboard, cabinet or event creator.** Everyone with an attendance record for the event, including `checked_in_at` and `marked_by`. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
+**Eboard, cabinet or event creator.** The event's **expected roster** — everyone the event is targeted at — with whatever attendance was recorded left-joined onto it. Each row carries `user_id`, name fields, `member_group`, `profile_picture_asset_id`, `status`, `checked_in_at` and `marked_by`. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
+
+:::info `status: null` is a fourth state, and it is not `absent`
+Someone who never scanned and was never marked comes back with `status`, `checked_in_at` and `marked_by` all null — **"nobody has accounted for this person yet."** Rendering that as absent would make an event nobody took attendance for read as though the entire chapter skipped it, so the portal shows it as *Not marked* and `PUT` only accepts the three real statuses. There is no route back to null once someone is marked.
+
+This changed in 2026-08. It used to return **only rows that already existed in `event_attendance`**, so anyone who didn't show up was absent from the response entirely — you could not see who was missing, which is what made the roster UI necessary.
+:::
+
+**Who lands on the roster** is the inverse of the calendar's visibility rule (`eventModel.findAllForUser`): an untargeted event addresses every member group, an `audience` array matches member groups, and `committee_ids` matches committee membership. Test, incomplete-profile and soft-deleted accounts are excluded.
+
+:::warning Chairs and eboard are implicitly `active`, and the roster has to say so
+`middleware/auth.js` `expandImpliedGroups()` treats chair and eboard as active, so a chair really does see an `audience: ["active"]` event. But the roster query only has `users.member_group` — a single resolved value where a chair is `'chair'` and nothing else. The obvious predicate:
+
+```sql
+u.member_group = ANY(ev.audience)   -- WRONG
+```
+
+**silently drops every chair and eboard member from an actives event's roster.** It looks correct and passes review. `attendanceModel.findRosterForEvent` re-applies the implication with a `CASE`; `test/attendanceRoster.test.js` covers it, and that test was confirmed to fail against the naive version. If `expandImpliedGroups` changes, this changes with it.
+:::
+
+One rule beyond the audience: **anyone with an existing `event_attendance` row stays on the roster regardless of targeting.** Audiences get edited after people have scanned, and an eboard member may check in to an event they were never targeted by — gating purely on the audience would hide a check-in the database already holds.
+
+`attendanceModel.findForEvent` still exists for the older "only what was recorded" shape; nothing calls it from the portal.
 
 ### `PUT /events/:id/attendance/:userId`
 
@@ -299,6 +321,19 @@ This is deliberately broader than `checkEventPermission`, which restricts a chai
 **Any member.** Self check-in, hit after scanning the QR while signed in. Validates that the token matches the event's real one and that the current time falls between the event's start and end plus a **30-minute grace period**. 403s outside that window or on a wrong/stale token.
 
 Regular members get no attendance UI beyond the post-scan confirmation screen. Only chairs and eboard see an Attendance surface in the portal.
+
+### The portal screen
+
+`components/portal/AttendancePage.jsx`, mounted at `/member/attendance` and `/admin/attendance`. A scrollable **event rail** on the left (Happening now / Upcoming / Past, live events first, sticky) and the **roster** on the right. It auto-selects whatever is live so the page opens on the event you're most likely running, and only when nothing is chosen — a refresh never yanks the pane away from a deliberate pick.
+
+**Show QR code** opens a fullscreen overlay that hides the roster behind it, closed with the button or `Esc`. That separation is the point: the QR goes on a projector in a room full of people, and the roster beside it is chapter-wide attendance.
+
+On screens below `lg` the rail collapses to a labelled dropdown above the roster rather than stacking a full-height event list on top of it.
+
+Two things worth not undoing:
+
+- **The QR renders on a literal white background** (`bg-white`, not `bg-card`). A QR on a dark surface does not scan.
+- **Row busy state is per person, not per roster.** Taking attendance means marking people in quick succession; a single shared flag disabled all ~80 dropdowns for each round trip, so the next person you reached for was always greyed out.
 
 ---
 
