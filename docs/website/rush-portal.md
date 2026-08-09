@@ -124,6 +124,17 @@ It is also linked from **`/login`**, under "Not a member yet?" — see [Sign-In 
 
 The page fetches `getPublicRushSignup()` on mount. When signup is open it shows the signup button; when it's closed it says so plainly and points at `/rush` and Instagram, rather than rendering a dead button. That call never rejects — it resolves to `is_open: false` on any failure, so a backend hiccup hides the button instead of breaking a public page.
 
+:::warning Signed in? The button becomes "Sign out to sign up"
+Creating a new account on a browser that already has one open is what mixes the two identities together — Authentik ends up holding the new rushee while the site's own cookie still holds the old member, and the member's session is later silently rewritten as the rushee. See [Two sessions in one browser](./sign-in.md#two-sessions-in-one-browser).
+
+So when `useSession()` reports an authenticated visitor, the CTA becomes **Sign out to sign up**, calling `logoutEverywhere()`. They land back on `/login`, which carries a **Sign up for rush** link straight back here — now signed out.
+
+Two details that are easy to undo by accident:
+
+- The page waits for `useSession()` to resolve before rendering **either** branch. The session lookup and the signup-status call race, and if the status wins, a signed-in visitor gets a live signup link for a beat — long enough to click.
+- **This is the second line of defence, not the first.** Most rushees scan a QR code that goes straight to Authentik and never load this page at all. `/auth/start` is the guard that catches those, and it has to keep working on its own.
+:::
+
 :::warning What the copy must not promise
 Step 3 was reworded once [Interviews](./interviews.md) shipped — it previously said signup details would be *announced*, because no such feature existed. It now describes the Interviews tab, but still has to read correctly **before** eboard publishes a schedule, since the tab isn't there until they do.
 

@@ -143,6 +143,33 @@ Once enrolled, the user logs in at [ugaktp.com](https://ugaktp.com):
 4. `PUT /users/me/profile` sets `profile_complete = true`
 5. Session is updated, user is redirected to their portal
 
+:::danger Enrollment can RENAME an existing account instead of creating one — confirmed 2026-08-09
+An eboard member signed out, opened rush signup on the same browser, and created a rush account. **No new user was created.** Their existing Authentik user was renamed to the rush username and gained the `rush` group, keeping its original groups and its `sub` — so signing in afterwards returned their real account under the wrong name, with their profile intact and the profile builder correctly skipped.
+
+The cause is that the enrollment flow was reachable by a browser Authentik still considered authenticated. Authentik's User Write stage writes to `pending_user`, which for an authenticated request **is the signed-in user**, so the flow updates them instead of creating anybody.
+
+Two settings close it, and both are worth having:
+
+| Where | Set to | Why |
+|---|---|---|
+| Flows → `ktp-enrollment` → **Authentication** | **Require unauthenticated** | Authentik refuses the flow outright for a signed-in browser, rather than picking a victim to write to |
+| Stages → `enrollment-user-write` → **User creation mode** | **Always create** | Removes the fall-through to updating `pending_user` even if the first guard is ever loosened |
+
+**And this is why the browser was still authenticated:** signing out of the website was confirmed 2026-08-09 not to sign the browser out of Authentik. **Providers → ktpapp → Invalidation flow** must be `default-invalidation-flow` (which runs a `user_logout` stage), not `default-provider-invalidation-flow` (which ends only the application session). New OAuth2 providers default to the latter, and it is a trap because logout still honours `post_logout_redirect_uri` and looks like it worked. Full detail in [Sign-In Flow](../website/sign-in.md#two-sessions-in-one-browser).
+
+**No website change can prevent this.** The signup URL points straight at Authentik and is printed on flyers as a QR code, so the site is never in the loop. It has to be fixed here.
+
+**Repair for an account this happened to:** rename it back and remove the `rush` group in Authentik, then have them sign in again — `POST /users/sync` re-mirrors both `username` and `member_group` from the fresh token, so the database self-heals. Nothing needs editing in Postgres by hand.
+:::
+
+:::warning Enrolling replaces Authentik's session for that browser
+Finishing this flow logs the browser in as the new account — that's the `enrollment-user-login` stage at order 100. If someone **else** was already signed in to the site on that browser, Authentik now holds the new account while the site's own cookie still holds the old one, and the two disagree with nothing to reconcile them.
+
+The website handles this at `/auth/start`, where every enrollment lands: a session that doesn't obviously belong to whoever just enrolled gets a **chooser** rather than a redirect. Before that guard existed, the new user was dropped into the previous user's portal, and the previous user's session was later silently rewritten as the new one.
+
+This matters most for **rush invitations**, which are non-single-use and scanned off flyers, so the same physical phone or laptop can run the flow more than once. Full detail in [Sign-In Flow → Two sessions in one browser](../website/sign-in.md#two-sessions-in-one-browser).
+:::
+
 ---
 
 ## Groups in Authentik
@@ -188,3 +215,14 @@ Group names are **case-sensitive** and must match exactly what's used in the inv
 - Check their groups in Authentik: **Directory → Users → select user → Groups tab**
 - Group priority: `eboard > chair > active > alumni > pledge`
 - The DB `member_group` updates on every login via `/users/sync`
+- If Authentik looks right but the **portal** is still wrong, the website session's `groups` are stale. They now refresh with the access token (from the refreshed `id_token`), so this should resolve within the access token's lifetime — signing out and back in forces it immediately
+
+**A member suddenly displays as "Rushee" but Authentik still shows their real group:**
+- This is `member_group` in Postgres, not Authentik. `middleware/auth.js` supplies `rush` when a token carries no group it recognises — a safety net so a misconfigured account isn't locked out of everything — and `syncUser` used to write that guess into `users.member_group`, where every badge reads it
+- Fixed: `req.user.group_defaulted` marks the guess, and `upsert`'s `preserveMemberGroup` lets it fill an empty column but never overwrite a known group. **Any new code that writes based on `req.user.groups` must check the same flag**
+- To repair an account already stamped: one sign-in carrying real groups rewrites the column. If it persists, the token genuinely isn't carrying `groups` — check the OIDC provider's **groups** scope mapping
+
+**Username or roles changed on their own:**
+- Almost always two accounts on one browser: someone enrolled or signed in as a different user on a device where another account was already open. See [Sign-In Flow → Two sessions in one browser](../website/sign-in.md#two-sessions-in-one-browser)
+- Nothing is corrupted in Authentik or the database — sign out fully (which ends the Authentik session too) and sign back in
+- If it happened *after* the chooser shipped, that's a real bug. Get the two usernames involved and whether they arrived by QR code or by the link on `/rush/how-it-works`
