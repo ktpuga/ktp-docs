@@ -54,21 +54,41 @@ Passwords live entirely in Authentik. ktp-api and the website never see, store, 
 
 Right now there are effectively **no password requirements at all**: a rushee can enroll with `a`. Fixing that means adding a *Password Policy*, which is not the same object as the default validation policies that were removed.
 
-#### Why the previous attempt crashed
+#### Why the previous attempt failed
 
-The default policies bound to `enrollment-prompt` included ones that evaluate `request.user` — during enrollment there is no user yet, because `enrollment-user-write` (order 30) hasn't run. They also assumed field names that the custom prompt stage doesn't use. Both surface as `Password Invalid` or a 500 on submit, which is why the fix was to strip them.
+Almost certainly a **field-name mismatch**, not a real crash.
 
-A **Password Policy** avoids this. It evaluates the submitted *field value*, not the not-yet-existent user.
+Authentik's Password Policy reads the submitted password out of the flow's prompt context, using whatever key its `Password field` setting names (default: `password`). If that key isn't in the context — because the custom `enrollment-prompt` stage names its field something else — the policy doesn't skip or pass. It **fails**, with `Password not set in context`.
+
+That renders as `Password Invalid` on the enrollment form, for *every* signup, no matter how strong the password is. Which matches the symptom in [Troubleshooting](#troubleshooting) exactly, and explains why stripping every validation policy was what made enrollment work again.
+
+So the fix is not a different kind of policy — it's the same kind, with `Password field` actually matching the prompt.
+
+#### Two places policies attach, and only one is right
+
+This distinction is the whole game:
+
+| Where | What it does | Use for passwords? |
+|---|---|---|
+| **Stage's `Validation Policies`** (on the Prompt Stage itself) | Runs when the form is **submitted**; a failure shows the policy's error message next to the form and the user retries | **Yes** |
+| **Policy Binding** on the flow's Stage Binding | Decides whether the stage **runs at all**; a failure makes Authentik **skip the stage** | **No** |
+
+Binding a password policy in the second place doesn't reject weak passwords — it silently skips the prompt that collects them.
 
 #### Setup
 
-1. **Customisation → Policies → Create → Password Policy.** Name it `ktp-password-strength`.
-2. Set the rules. A reasonable baseline for a student org:
+1. **Find the real field key first.** Flows and Stages → Stages → `enrollment-prompt` → Edit → look at its **Prompts**, open the password one, read its **Field Key**. It's often `password`, but read it rather than assume — this is the step the previous attempt got wrong.
+2. **Customisation → Policies → Create → Password Policy.** Name it `ktp-password-strength`.
+3. Set **Password field** to the key from step 1.
+4. Set the rules — a reasonable baseline for a student org:
    - Minimum length: `10`
-   - Minimum uppercase: `0`, lowercase: `0`, digits: `0`, symbols: `0`
+   - Uppercase / lowercase / digits / symbols: `0`
    - Error message: *"Password must be at least 10 characters."*
-3. **Set `Password field` to the field name your prompt stage actually uses.** This is the step that silently breaks everything if it's wrong — the policy passes trivially because it's checking a field that doesn't exist. Check it under **Flows → Stages → `enrollment-prompt` → Prompts**; it is usually `password`, but confirm rather than assume.
-4. Bind it to the **prompt stage**, not the flow: **Flows → `ktp-enrollment` → Stage Bindings → `enrollment-prompt` → Policy Bindings → Bind existing policy.**
+5. Attach it as a **validation policy on the stage**: Flows and Stages → Stages → `enrollment-prompt` → Edit → **Validation Policies** → add `ktp-password-strength`. **Not** a policy binding on the flow's stage binding — see the table above.
+
+:::note If the prompt has a confirmation field
+A second password field (e.g. `password_repeat`) is matched by the Prompt Stage itself, not by this policy. The policy only needs the one key from step 1.
+:::
 
 :::tip Prefer length over character classes
 Composition rules (one uppercase, one symbol) push people toward `Password1!` and are worse than a longer minimum. Length is the requirement that actually helps here.
@@ -77,7 +97,14 @@ Composition rules (one uppercase, one symbol) push people toward `Password1!` an
 :::danger Test with a throwaway invitation before rush opens
 Enrollment breaking is not a bug you find gradually — it breaks *everyone* signing up, during the two weeks of the year when signups matter, and the people hitting it are prospective members with no way to report it to you.
 
-Create a disposable invitation, run the whole flow in a private window, and confirm you can still enroll. Do this **before** rush signup opens, not after. If enrollment breaks, unbind the policy first and diagnose second — `docker logs` on the Authentik container shows the real error, which is usually the wrong field name from step 3.
+Create a disposable invitation, run the whole flow in a private window, and confirm you can still enroll. Do this **before** rush signup opens, not after.
+
+Test in this order — the second case is the one that catches a field-name mismatch:
+
+1. A **weak** password (`abc`) → must be rejected with *your* error message, not `Password not set in context`
+2. A **strong** password (`correct-horse-battery`) → must enroll successfully
+
+Passing (1) but failing (2) is the signature of a wrong `Password field`: the policy is failing everything, not evaluating anything. If that happens, remove it from **Validation Policies** first and diagnose second — `docker logs` on the Authentik container shows the real reason.
 :::
 
 #### Existing accounts
@@ -148,7 +175,7 @@ Group names are **case-sensitive** and must match exactly what's used in the inv
 
 **"Password Invalid" error during enrollment:**
 - Remove all validation policies from the `enrollment-prompt` Prompt Stage binding
-- If you were adding password requirements, unbind the policy first, then check its **Password field** matches the prompt stage's actual field name — see [Password requirements](#password-requirements). A Password Policy is safe here; the default validation policies are not, because they evaluate a user that doesn't exist until order 30
+- If you were adding password requirements, remove the policy from the stage's **Validation Policies** first, then check its **Password field** matches the prompt's actual **Field Key**. A mismatch makes the policy fail *every* password with `Password not set in context`, which renders as this exact error — see [Password requirements](#password-requirements)
 
 **Signup rejects a valid-looking email:**
 - The UGA address requirement is enforced by **ktp-api**, not Authentik — enrollment itself collects no email. The check is in `services/emails.js` and it accepts `uga.edu` and any subdomain, nothing else. Someone without a UGA address yet cannot finish `/complete-profile`
