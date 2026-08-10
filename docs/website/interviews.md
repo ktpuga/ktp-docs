@@ -221,6 +221,16 @@ The rush-facing query never selects other candidates' names. A rushee has no bus
 A sheet that silently omits taken rows makes it look like there were never that many times on offer. A paper sign-up sheet shows the crossed-out rows too.
 :::
 
+### Every tile names its own room
+
+A slot may override the round's `location`, and that override used to be invisible until **after** booking — the round room showed in the board header, and the slot room appeared only on the confirmation card. So a rushee could take 5:20 without knowing it was in a different building from the 5:00 above it.
+
+Each tile now shows `slot.location ?? schedule.location`, the same resolution the confirmation card and the ICS feed's `COALESCE(s.location, sc.location)` use, and the room is part of the tile's `aria-label` so it's heard before committing rather than after.
+
+When some slots override the round room, the header adds *"— unless a time below says otherwise"*. Without that, a header saying "Boyd 204" above a tile saying "MLC 248" reads as a contradiction instead of a default.
+
+Room names are `truncate`d with a `title` fallback: these tiles sit in a four-column grid, and one long name would otherwise stretch the track and break the row.
+
 ### `mine` is derived from the booking id
 
 The rush query selects `my_booking_id` and derives `mine` from it being non-null, rather than selecting an `EXISTS` flag separately. The two can then never disagree — a slot flagged as yours with no id to cancel is a dead "Change my time" button.
