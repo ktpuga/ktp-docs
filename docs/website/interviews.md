@@ -213,9 +213,25 @@ This is the part worth getting right, and it's enforced by using **two different
 | Unpublished rounds | hidden | shown |
 | Seats taken | count only | count |
 | **Who booked** | **never selected** | full names + emails |
+| **Who is interviewing** | **never selected** | full list + counts |
 | Your own booking | flagged `mine` + `booking_id` | — |
 
-The rush-facing query never selects other candidates' names. A rushee has no business knowing who else is interviewing at 5:20, and leaving the names out of the SQL is a stronger guarantee than remembering to strip them in the controller — the same reasoning as the [content visibility](./photos-and-documents.md) SQL/JS split.
+The rush-facing query selects **neither** name set, each for its own reason:
+
+- **Other candidates.** A rushee has no business knowing who else is interviewing at 5:20.
+- **The interviewers.** Told before booking, it lets candidates shop for a friendly interviewer; the chapter decides who takes which slot, not the candidate.
+
+Both are left out of the SQL rather than stripped later, which is a stronger guarantee than remembering to filter in a controller — the same reasoning as the [content visibility](./photos-and-documents.md) SQL/JS split.
+
+:::note One omission covers two screens
+`my_booking` is derived from these same rows, so not selecting interviewer names also blanks the post-booking confirmation card. Hiding it in the tile component alone would have left it on the card, one query away.
+
+The candidate's calendar is covered separately — `findForCalendar` doesn't select it either, and its `description` is a bare `"Interview"`. That one matters most: an ICS `DESCRIPTION` is cached on a phone for **weeks**, so it's the leak that is hardest to take back. `calendarFeed.test.js` asserts it at the wire, scoped to the interview's own `VEVENT`.
+:::
+
+:::warning Already-synced calendar entries keep the old text
+Changing the feed can't reach an entry a phone already downloaded. Anyone who booked before this shipped may still see "Interview with …" until their calendar app re-fetches.
+:::
 
 :::note Full slots stay on the board, greyed out
 A sheet that silently omits taken rows makes it look like there were never that many times on offer. A paper sign-up sheet shows the crossed-out rows too.
@@ -269,9 +285,9 @@ A booked interview lands on the rushee's portal calendar and their [calendar sub
 
 **Only the booker's.** There is no equivalent of the meetings "organiser sees it too" case — the person running interviews wants the sign-up sheet, not forty separate calendar entries. `calendarFeed.test.js` asserts an interviewer does *not* get the slots they're running.
 
-The interviewers' names ride along in the description ("Interview with Ben"), built by `INTERVIEWER_NAMES` as a **single comma-joined string** under the same `interviewer_name` key it has always used. That shape is kept deliberately: the ICS `DESCRIPTION` and `EventsCalendar.jsx` both consume it, and widening it to an array would have meant changing both for no gain. With several interviewers the calendar shows them as one chip.
+The `description` is a bare `"Interview"`. It used to read "Interview with Ben", but **the candidate is not told who is conducting their interview**, so `findForCalendar` no longer selects a name at all — see the visibility table above.
 
-It uses `CONCAT_WS` rather than the `first_name || ' ' || last_name` idiom used elsewhere in the codebase:
+`INTERVIEWER_NAMES` still exists for the eboard sheet, where it builds a **single comma-joined string** under the `interviewer_name` key rather than an array, because `findScheduleForManagement` consumers expect that shape. It uses `CONCAT_WS` rather than the `first_name || ' ' || last_name` idiom used elsewhere in the codebase:
 
 :::warning `||` with a NULL operand yields NULL
 A member with a first name but no last name falls all the way through to `username` — or to nothing. `CONCAT_WS` skips NULL arguments instead, so "Ben" stays "Ben".
