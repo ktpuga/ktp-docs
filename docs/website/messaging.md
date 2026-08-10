@@ -94,7 +94,7 @@ The rule members are shown, in the modal itself, is that the chat is private to 
 
 #### Who can administer one
 
-Deleting a chat, changing its photo, and adding or removing members depend on **the chat**, not on the caller's Authentik groups:
+Renaming a chat, deleting it, changing its photo, and adding or removing members depend on **the chat**, not on the caller's Authentik groups:
 
 | Chat | Administrator |
 |---|---|
@@ -102,6 +102,8 @@ Deleting a chat, changing its photo, and adding or removing members depend on **
 | Member-created (`is_member_created = TRUE`) | its creator, and **not** eboard |
 
 Creating an official chat confers nothing afterwards, or any member who once made a committee chat would keep power over it.
+
+**Renaming** is the pencil beside the chat's name in the info modal, and it works on every chat type including committee chats and the Eboard chat. Neither of those has a name that gets re-derived later, so nothing overwrites a hand-set one. If committee renaming is ever built, that's the moment to decide whether it repoints its chat's name.
 
 :::warning This was a real hole, closed with the feature
 Those five routes used to be `requireGroup("eboard")` and never consulted `is_member_created`, so **eboard could delete or repopulate a member chat they were forbidden to read** — a larger power than the read they'd been denied. A router-level group check can't express "unless a member made it" because the answer depends on the row, so the check moved into `groupChatsController.loadAdministrable` and those routes now carry no `requireGroup` at all.

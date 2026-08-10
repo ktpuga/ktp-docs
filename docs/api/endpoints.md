@@ -728,6 +728,12 @@ Chats the caller is a member of, with last message + unread count.
 
 The allowed groups are a *positive* list (`eboard`, `chair`, `active`, `alumni`, `pledge`), never "not `rush`": an accepted rushee keeps the `rush` group in Authentik until someone removes it, so an exclusion rule would lock real members out while that stale group lingers.
 
+### `PATCH /group-chats/:id`
+
+**Administrator only** (see the note below). Renames the chat. `{ "name": "..." }` — **400** on a blank or whitespace-only name, which leaves the old name in place.
+
+Works on every chat type, committee chats and the Eboard chat included. Neither has a name that gets re-derived later: a committee chat is named once at creation and there is no committee update function anywhere, and the Eboard chat is looked up by `is_eboard_chat`, never by name.
+
 ### `DELETE /group-chats/:id`
 
 **Administrator only** (see the note below). Cascades members, messages, and read markers.
@@ -792,7 +798,7 @@ Any current member can view the participant list.
 | Official (`is_member_created = FALSE`) | eboard |
 | Member-created (`is_member_created = TRUE`) | its `created_by`, and **not** eboard |
 
-This covers `DELETE /:id`, `PUT /:id/photo`, `PATCH /:id/audience`, `POST /:id/members` and `DELETE /:id/members/:userId`. None of them carries `requireGroup` at the router, because a router-level group check can't express "unless a member made it" — the answer depends on the row, so it's checked in the controller. `created_by` confers nothing on an official chat.
+This covers `PATCH /:id`, `DELETE /:id`, `PUT /:id/photo`, `PATCH /:id/audience`, `POST /:id/members` and `DELETE /:id/members/:userId`. None of them carries `requireGroup` at the router, because a router-level group check can't express "unless a member made it" — the answer depends on the row, so it's checked in the controller. `created_by` confers nothing on an official chat.
 
 `PATCH /:id/audience` additionally returns **409** on a member-created chat, even for its creator: groups and committees are official-targeting concepts.
 :::
