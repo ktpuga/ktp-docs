@@ -172,6 +172,7 @@ Gained several columns beyond the original bare title/date/location shape:
 | `created_by` | → `users`. Needed because non-eboard users (committee chairs) can create events too, to check *which* committee they're allowed to scope one to |
 | `requires_attendance` | Opt-in per event. Turning it on generates `attendance_token` the first time |
 | `attendance_token` | Random, generated once and never regenerated. Never returned by the events endpoints — only by `GET /events/:id/attendance/code` |
+| `attendance_finalized_at` | `TIMESTAMPTZ`. Null = the roster still re-syncs on every read; non-null = frozen. Set by the Finalize button, reversible. Returned on **every** event as `attendanceFinalizedAt` so the attendance rail can flag a past event nobody finalised |
 
 :::warning Events and announcements scope to committees differently
 `events.committee_ids` is an **array** — one event can belong to several committees. `announcements.committee_id` is a **single nullable ID**. They're not symmetrical; don't assume one shape when querying across both.
@@ -181,9 +182,19 @@ Gained several columns beyond the original bare title/date/location shape:
 
 ### `event_attendance` table
 
-One row per member per event they have an attendance record for, holding `status` (`present` / `excused` / `absent`), `checked_in_at`, and `marked_by`.
+**The event's materialised roster**, not a log of marks: one row per *expected* attendee, written by `attendanceModel.syncRoster`, with `status` (`present` / `excused` / `absent`) left **null** until somebody accounts for that person. Also holds `checked_in_at`, `marked_by`, and the frozen `display_name` / `member_group`.
 
 A **null `marked_by` means the member self-checked-in** by scanning the QR code; a populated one means an organizer set the status manually. Self check-in validates the token and that the current time falls inside the event window plus a 30-minute grace period.
+
+:::warning `display_name` and `member_group` are frozen copies — don't "normalise" them away
+They look like denormalised duplicates of `users`. They are the point of the table. **Pledges are initiated mid-semester**, so reading the group live would relabel — or silently drop — every pledge on every past event the day their class becomes active, rewriting history. `display_name` additionally keeps a record readable after the person deletes their account.
+
+The migration's backfill left `member_group` **null** on pre-existing rows rather than stamping today's group: a wrong frozen group is worse than an admitted gap. Render those as "not recorded", not as a default.
+:::
+
+:::info Why the primary key is a surrogate `id`
+`user_id` is `ON DELETE SET NULL`, so a deleted member's attendance survives under their frozen name — and a nullable column can't sit in a primary key. The old composite `(event_id, user_id)` PK became `id SERIAL` plus the unique index `event_attendance_event_user_idx`, which the upserts target and is therefore load-bearing rather than decorative. Postgres treats nulls as distinct in a unique index, so two deleted members on one event are two rows, not a conflict.
+:::
 
 ### `push_devices` / `notification_preferences` / `notification_delivery_log`
 
