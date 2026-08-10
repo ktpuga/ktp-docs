@@ -710,7 +710,7 @@ A sender can always delete their own message. Eboard can delete any message with
 
 ## Group Chats
 
-Eboard-created, named, with an assigned member list — access is gated by actual DB membership (`group_chat_members`), not a broad Authentik group, so most routes below check membership inline and return **403** if the caller isn't in that specific chat. Same content filter + rate limit as Direct Messages above. Blocking doesn't stop someone from posting in a shared group chat (they're a legitimate member) — it filters their messages out of `GET /group-chats/:id/messages` for whoever blocked them, same idea as the DM thread filtering.
+Named chats with an assigned member list, created either by eboard (official) or by any member except a rushee (private). Access is gated by actual DB membership (`group_chat_members`), not a broad Authentik group, so most routes below check membership inline and return **403** if the caller isn't in that specific chat. Same content filter + rate limit as Direct Messages above. Blocking doesn't stop someone from posting in a shared group chat (they're a legitimate member) — it filters their messages out of `GET /group-chats/:id/messages` for whoever blocked them, same idea as the DM thread filtering.
 
 ### `GET /group-chats`
 
@@ -718,11 +718,25 @@ Chats the caller is a member of, with last message + unread count.
 
 ### `POST /group-chats`
 
-**Eboard only.** `{ "name": "...", "member_ids": ["uuid", "uuid"] }` — the creator is automatically added too, so eboard isn't locked out of a chat they just made.
+**Eboard only.** Creates an **official** chat. `{ "name": "...", "member_ids": ["uuid", "uuid"], "audience": [...], "committee_ids": [...] }` — the creator is automatically added too, so eboard isn't locked out of a chat they just made.
+
+### `POST /group-chats/member`
+
+**Any member except `rush`.** Creates a **member-created** chat (`is_member_created = TRUE`), invisible to eboard oversight and administered by its creator alone.
+
+`{ "name": "...", "member_ids": ["uuid", "uuid"] }`. No `audience` or `committee_ids` is accepted — a member's chat is exactly the people they picked, and one that auto-followed a whole group would be a broadcast channel. **400** if any id belongs to a rushee, **404** if any id has no live account.
+
+The allowed groups are a *positive* list (`eboard`, `chair`, `active`, `alumni`, `pledge`), never "not `rush`": an accepted rushee keeps the `rush` group in Authentik until someone removes it, so an exclusion rule would lock real members out while that stale group lingers.
 
 ### `DELETE /group-chats/:id`
 
-**Eboard only.** Cascades members, messages, and read markers.
+**Administrator only** (see the note below). Cascades members, messages, and read markers.
+
+### `DELETE /group-chats/:id/leave`
+
+Removes **the caller** from the chat. The one roster change that needs no administration right, which is why it isn't `DELETE /:id/members/me` — that path would be matched by the `:userId` route and inherit its check.
+
+**409** if you're in the chat via its audience or a committee (there'd be no row to delete, so it would report success and change nothing), if you created a member chat (nobody else could administer it afterwards — delete it instead), or for the Eboard chat (login reconciliation would undo it). **403** if you aren't in the chat.
 
 ### `GET /group-chats/:id/messages`
 
@@ -766,11 +780,22 @@ Any current member can view the participant list.
 
 ### `POST /group-chats/:id/members`
 
-**Eboard only.** `{ "user_id": "uuid" }`
+**Administrator only.** `{ "user_id": "uuid" }`
 
 ### `DELETE /group-chats/:id/members/:userId`
 
-**Eboard only.**
+**Administrator only.** **409** if the target belongs via the audience or a committee, since deleting their row would remove nothing.
+
+:::note "Administrator" depends on the chat, not on your groups
+| Chat | Administrator |
+|---|---|
+| Official (`is_member_created = FALSE`) | eboard |
+| Member-created (`is_member_created = TRUE`) | its `created_by`, and **not** eboard |
+
+This covers `DELETE /:id`, `PUT /:id/photo`, `PATCH /:id/audience`, `POST /:id/members` and `DELETE /:id/members/:userId`. None of them carries `requireGroup` at the router, because a router-level group check can't express "unless a member made it" — the answer depends on the row, so it's checked in the controller. `created_by` confers nothing on an official chat.
+
+`PATCH /:id/audience` additionally returns **409** on a member-created chat, even for its creator: groups and committees are official-targeting concepts.
+:::
 
 :::note Two chats are managed automatically
 Every committee gets a linked group chat whose membership tracks committee membership. There's also a singleton eboard chat, re-synced against the `eboard` Authentik group on every login. Neither should be managed by hand.

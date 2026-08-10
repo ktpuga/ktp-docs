@@ -26,15 +26,16 @@ Each conversation shows an unread badge and the last message preview. Opening a 
 
 ## Group Chats
 
-The one messaging mode that's **not** open to everyone by default: access is checked against an actual membership list in the database, not a broad Authentik group like everything else in the app. Three ways a chat comes to exist:
+The one messaging mode that's **not** open to everyone by default: access is checked against an actual membership list in the database, not a broad Authentik group like everything else in the app. Four ways a chat comes to exist:
 
-- **Eboard-created**: eboard names a chat (e.g. "Rush Committee") and assigns specific members — only eboard can create/delete a chat or add/remove members (editable any time after creation).
+- **Eboard-created**: eboard names a chat (e.g. "Rush Committee") and assigns specific members, editable any time after creation.
+- **Member-created**: any member except a rushee makes a chat for themselves. Private to the people they add, and administered by whoever made it. See [Member-created chats](#member-created-chats) below.
 - **Committee chats**: every [committee](./overview.md#committees) automatically gets its own linked group chat. Joining or leaving the committee joins/leaves its chat too — no separate step.
 - **The Eboard chat**: a singleton chat that every current eboard member is automatically in, reconciled on every login against the `eboard` Authentik group (self-healing — there's no explicit "join eboard" action to hook, unlike committees).
 
 **Any member of a given chat** can post — this is a real multi-party thread, not a broadcast, so message bubbles show the sender's name (unlike DMs, where it's just "you" vs. "them").
 
-Eboard can set a **chat photo** as the group's avatar.
+A chat's administrator can set a **chat photo** as the group's avatar.
 
 ### Membership is derived, not a stored roster
 
@@ -55,7 +56,7 @@ Eboard reads **every official chapter chat**, whether or not they're a member �
 | `FALSE` | official chapter space — committee chats, audience chats, the Eboard chat | **yes**, always |
 | `TRUE` | a private space between members | **no** — the way in is a report, not a permission |
 
-**Nothing sets it to `TRUE` yet.** Member-created group chats are a planned feature; the column exists now so the oversight query is already correct the day they ship, rather than being retrofitted under a query that assumed every chat was official. `test/groupChatOversight.test.js` covers both halves, including the branch the product can't reach yet.
+`POST /group-chats/member` is what sets it `TRUE`. `test/groupChatOversight.test.js` and `test/memberGroupChats.test.js` cover both halves of the rule.
 
 :::note DMs and meetings are NOT covered by this
 Eboard oversight stops at group chats. Direct messages have no eboard view at all, and [meetings](./meetings.md) remain participant-only — that's the entire reason they live outside `events`. Both were deliberate calls, not gaps.
@@ -83,6 +84,58 @@ The **Eboard chat is excluded** (409). Its membership is already reconciled from
 
 :::note The roster must refetch when the audience changes
 Membership is derived, so the member list in the UI keys on the audience as well as the chat id. Keying on the chat id alone left the old roster on screen until you closed and reopened the chat, which reads as "saving didn't work".
+:::
+
+### Member-created chats
+
+Any member **except a rushee** can make their own group chat: active, pledge, chair, alumni and eboard. In the Group Chats tab, **New Group Chat** opens the same modal everyone else uses, minus the group and committee pickers. Eboard sees one extra control, a **Chapter chat / Personal chat** choice, defaulting to Chapter so the button keeps meaning what it always meant.
+
+The rule members are shown, in the modal itself, is that the chat is private to the people they add and eboard can't read it unless someone reports a message in it. That is stated rather than assumed: nobody can guess either half of it.
+
+#### Who can administer one
+
+Deleting a chat, changing its photo, and adding or removing members depend on **the chat**, not on the caller's Authentik groups:
+
+| Chat | Administrator |
+|---|---|
+| Official (`is_member_created = FALSE`) | eboard |
+| Member-created (`is_member_created = TRUE`) | its creator, and **not** eboard |
+
+Creating an official chat confers nothing afterwards, or any member who once made a committee chat would keep power over it.
+
+:::warning This was a real hole, closed with the feature
+Those five routes used to be `requireGroup("eboard")` and never consulted `is_member_created`, so **eboard could delete or repopulate a member chat they were forbidden to read** — a larger power than the read they'd been denied. A router-level group check can't express "unless a member made it" because the answer depends on the row, so the check moved into `groupChatsController.loadAdministrable` and those routes now carry no `requireGroup` at all.
+:::
+
+#### Members' chats hold people, not groups
+
+A member's chat takes an explicit member list only. `audience` and `committee_ids` are refused, **including from the creator** (409). A chat that auto-follows "every active member" and keeps following role changes is a broadcast channel, and letting a member conjure one is a spam vector wearing a feature's clothes. Rushees can't be added to one either: their surface is deliberately narrow and their DMs are leadership-only, so this would route around both.
+
+#### Leaving
+
+`DELETE /group-chats/:id/leave` removes you from a chat, and it's the one roster change that needs no administration right. It's a separate path rather than `DELETE /:id/members/me` because that would be matched by the `:userId` route and inherit its administration check. Four refusals, each mirrored in the UI so the button only appears when it will work:
+
+| Case | Why |
+|---|---|
+| You're in via the audience or a committee | No row to delete, so it would report success and leave you in the chat |
+| You created the chat | Nobody else could administer it afterwards. Delete it instead |
+| The Eboard chat | Reconciled from Authentik on every login, so it would undo itself |
+| You're viewing through eboard oversight | You aren't in the chat to begin with |
+
+### The report escape hatch
+
+An **open** report naming a message in a member-created chat opens that chat to eboard. Without it the privacy rule would be absolute and a report on a member chat unactionable: eboard would receive a complaint about a conversation they cannot open.
+
+- **It ends by itself.** `canRead` reads `status = 'open'` live, so resolving or dismissing the report closes the chat again. Nothing is granted that would later need revoking.
+- **Reading is not participating.** Reads go through `canRead`, writes through `isMember`, so eboard can read the chat and delete the offending message but cannot post in it.
+- **It's reachable from the report, not by browsing.** A reported chat still doesn't appear in `GET /group-chats/all`. Otherwise a moderation grant quietly becomes general surveillance.
+
+:::warning Two details in the join hold the whole thing up
+`reports.content_id` is one loose `TEXT` column shared by DMs, group messages and photos, and **nothing validates its shape** — `reportsController` stores `req.body.content_id` exactly as posted.
+
+The join must therefore read `gcm.id::text = r.content_id`, never `r.content_id::integer`. A single report filed as `group_message` with a non-numeric `content_id` would make an integer cast throw `22P02` and take down `canRead` for **every** eboard read at once, not just that chat. That's a one-request denial of service available to anyone who can file a report.
+
+`content_type = 'group_message'` is a filter, not decoration. Ids restart per table, so without it a DM report whose id collided with a group message's would unlock an unrelated chat.
 :::
 
 ---
