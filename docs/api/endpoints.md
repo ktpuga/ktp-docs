@@ -403,6 +403,87 @@ Any current member can view.
 
 ---
 
+## Interviews
+
+Calendly-style slot signup that replaced meetings for rushees. Router-level gate is **auth + a rush-accessible group**, then narrowed per route. Full design in [Interviews](../website/interviews.md).
+
+A slot takes **two different claims** against **two different counts**, and confusing them is the main hazard here:
+
+| Claim | Table | Count | Unique per |
+|---|---|---|---|
+| A rushee **attending** | `interview_bookings` | `capacity` | slot **and round** |
+| A member **running** it | `interview_slot_interviewers` | `interviewer_capacity` | slot only |
+
+### `GET /interviews/available`
+
+Published rounds with their slots. Each slot carries seats taken, `mine`, and `booking_id`. **Never returns other candidates' names.**
+
+### `GET /interviews/calendar`
+
+The caller's booked interviews, event-shaped for the portal calendar and ICS feed.
+
+### `POST /interviews/slots/:id/book`
+
+Claim a seat. `409` with `code: "slot_full"` or `"already_booked"`; `404` for an unpublished slot, deliberately identical to a missing one so drafts aren't discoverable by probing ids.
+
+### `DELETE /interviews/bookings/:id`
+
+Yours, or anyone's for eboard + chair. A push goes out only when someone else cancelled it.
+
+### `GET /interviews/interviewer-schedules`
+
+**Members only — never rushees.** Published rounds whose `interviewer_committee_ids` include a committee the caller belongs to. Returns `[]` rather than `403` when there are none.
+
+Each slot carries `interviewer_count`, `interviewers`, `i_am_interviewing`, **and `bookings` — the rushee names.** That is wider than `GET /interviews/available` on purpose: someone about to conduct an interview needs to know who they're meeting. Note that `POST /committees/:id/join` is self-service, so the audience is any member who joins a designated committee.
+
+### `POST /interviews/slots/:id/interviewers`
+
+**Members only — never rushees.** Claims a spot to run the slot. Body is empty for yourself; eboard + chair may pass `{ "user_id": "..." }` to assign someone else.
+
+`403` if your committee isn't designated on the round. `409` with `code: "interviewers_full"` or `"already_signed_up"`.
+
+### `DELETE /interviews/slots/:id/interviewers/:userId`
+
+Withdraw. Yours, or anyone's for eboard + chair. A push goes out only when someone else removed you.
+
+### `GET /interviews/schedules`
+
+**Eboard + chair.** Every round, drafts included, with slot/seat counts.
+
+### `POST /interviews/schedules`
+
+**Eboard + chair.** `{ "title": "...", "description"?, "location"?, "interviewer_committee_ids"? }` — created as a draft.
+
+### `GET /interviews/schedules/:id`
+
+**Eboard + chair.** The full sign-up sheet: every slot, who booked it, and who is running it.
+
+### `PATCH /interviews/schedules/:id`
+
+**Eboard + chair.** Also the publish switch and the committee list. Flipping `published` false → true sends one push to every current rushee; re-saving an already-published round does not.
+
+An absent `interviewer_committee_ids` leaves it alone; an **empty array closes the round** to everyone outside eboard.
+
+### `DELETE /interviews/schedules/:id`
+
+**Eboard + chair.** `409` with `code: "has_bookings"` and the count if anyone has booked; `?force=true` overrides and notifies everyone it unbooked.
+
+### `POST /interviews/schedules/:id/slots`
+
+**Eboard + chair.** `{ "starts_at", "ends_at", "location"?, "capacity"?, "interviewer_capacity"? }`. Max 50 seats, 10 interviewers, 500 slots per schedule.
+
+### `PATCH /interviews/slots/:id`
+
+**Eboard + chair.** Only the keys sent are changed, and an explicit `null` **clears** a nullable column rather than being ignored.
+
+`409` if `capacity` is lowered below seats taken, or `interviewer_capacity` below the number signed up. **Neither has a `?force` override** — it's a hard stop. Moving the start time notifies rushees and interviewers separately; changing either count notifies nobody.
+
+### `DELETE /interviews/slots/:id`
+
+**Eboard + chair.** `409` with `code: "has_bookings"` if booked; `?force=true` overrides. Notifies rushees and interviewers with different wording.
+
+---
+
 ## Polls
 
 Targeted the same way as Events/Announcements (`audience` array or `committee_id`, mutually exclusive). Voting is self-service; only eboard sees who voted for what — not anonymous to eboard.
@@ -769,9 +850,9 @@ They're recorded in the [activity log](../website/activity-log.md) by the global
 
 ---
 
-## Push Notifications
+## Notifications
 
-iOS APNs registration and per-user preferences. All routes require auth. **Device tokens are private to their owner** and are never returned by any list endpoint.
+iOS APNs registration, per-user preferences, and the web portal's per-tab badge counts. All routes require auth. **Device tokens are private to their owner** and are never returned by any list endpoint.
 
 ### `POST /notifications/devices`
 
@@ -785,15 +866,45 @@ Removes the caller's registration for that token.
 
 ### `GET /notifications/preferences`
 
-Returns `{ direct_messages_enabled, events_enabled }`, creating the row with both `true` if it doesn't exist yet.
+Returns seven booleans, creating the row with all of them `true` if it doesn't exist yet:
+
+`direct_messages_enabled`, `announcements_enabled`, `polls_enabled`, `meetings_enabled`, `events_enabled`, `event_reminders_enabled`, `email_enabled`.
+
+The first six are iOS push categories. `email_enabled` is the member's opt-out for the **email** channel and is the only one the website surfaces — a push toggle in a browser would silently govern a different device.
 
 ### `PUT /notifications/preferences`
 
-Updates both boolean fields.
+Updates any supplied boolean; **omitted fields keep their prior value**, so older iOS builds that know about only two of them stay compatible.
+
+### `GET /notifications/unread`
+
+Per-tab badge counts for the web portal sidebar:
+
+```json
+{ "announcements": 3, "calendar": 1, "meetings": 0, "polls": 2, "files": 0, "interviews": 0 }
+```
+
+Each count is "items in this tab created after your cursor for it, that you are allowed to see". **On the first call for a user the cursors are seeded to now and every count is 0** — existing content is never retroactively unread.
+
+Counts honour the same audience rules as the corresponding list endpoint, so a badge can never advertise something the caller cannot open. In particular an untargeted announcement or event badges **members only, never rushees**, and a rushee's `announcements` count comes from `rush_announcements` instead.
+
+Also quiet on purpose: you are never counted for content you posted yourself, and closed/expired polls and cancelled meetings don't count.
+
+### `POST /notifications/seen/:tab`
+
+Moves that tab's cursor to now — i.e. marks it read. `204` on success. `tab` must be one of `announcements`, `calendar`, `meetings`, `polls`, `files`, `interviews`; anything else is a `400`.
 
 **Behavior worth knowing:** DM alerts fire only after the message is persisted, only to the permitted recipient, and **never include the message body**. Event alerts fire on create, material update, or cancellation, to users who can actually see that event and have event notifications enabled. APNs failures are logged and never fail the underlying message/event request — a push that doesn't arrive is not a reason to suspect the send itself failed.
 
 APNs credentials come from environment variables only (`APNS_PRODUCTION_*` / `APNS_SANDBOX_*`); the API never reads a `.p8` file from disk. An incomplete set for one environment disables only that environment.
+
+**Reminders.** Events and meetings get durable reminder jobs at **2 hours and 30 minutes** before start; an event whose `requires_attendance` is true also gets one **1 day** ahead, titled "Required event". Any write to the event rebuilds its jobs, so a time change moves the reminders and leaves none stale; deleting it removes them. These are APNs-only.
+
+### `GET /notifications/channels`
+
+`{ "email": true | false }` — whether this deployment can actually send email. The website asks before offering the "also send this as an email" checkbox, and hides it when `false`, so the control can never post happily and mail nobody. Adding credentials flips it with no website deploy.
+
+**Email.** `POST /announcements` and `POST /events` accept `send_email: true`, which additionally emails everyone the item targets — minus deleted accounts, test accounts, and anyone with `email_enabled` false. Each recipient gets their own message. Sending is claimed atomically via `announcements.emailed_at` / `events.emailed_at`, so an item is emailed **at most once** and a later edit never re-sends. Requires `RESEND_API_KEY` and `EMAIL_FROM`; without them nothing is sent and a warning is logged, and no other behaviour changes.
 
 ---
 

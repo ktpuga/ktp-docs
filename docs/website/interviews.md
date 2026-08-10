@@ -8,6 +8,15 @@ After speed dating, eboard runs final interviews. This is the sign-up sheet: **e
 
 It replaced meetings in the rush portal. Rushees see **Interviews** at `/rushee/interviews`; eboard and chairs manage rounds at `/admin/interviews`, under the **Rush** nav section.
 
+There are **two kinds of claim** on a slot, and keeping them apart is the thing to understand before reading anything else here:
+
+| Claim | Table | Who | Limit |
+|---|---|---|---|
+| **Attending** — a rushee being interviewed | `interview_bookings` | rushees | one per *round* |
+| **Running** — a member conducting the interview | `interview_slot_interviewers` | members of designated committees | one per *slot* |
+
+They contend for different counts on the same row (`capacity` and `interviewer_capacity`) and are notified with different wording. See [Interviewer signup](#interviewer-signup).
+
 ## Why not just use meetings?
 
 Meetings were already open to rushees, so this looked like a UI change. It isn't — the two features have opposite shapes.
@@ -25,22 +34,50 @@ There was also a governance reason. A rushee proposing an arbitrary time and sum
 
 ## Schema
 
-Three tables, in `migrations/1786600000000_add-interview-scheduling.sql`.
+Three tables in `migrations/1786600000000_add-interview-scheduling.sql`, plus a fourth added by `migrations/1787600000000_add-interview-interviewer-signup.sql`.
 
 ```
 interview_schedules  ──<  interview_slots  ──<  interview_bookings
-   (a round)               (a time)               (a claimed seat)
+   (a round)               (a time)          │    (a rushee attending)
+                                             └<  interview_slot_interviewers
+                                                  (a member running it)
 ```
 
 ### `interview_schedules`
 
 One round of interviews — "Fall 2026 Final Interviews". Carries a default `location` that individual slots may override, and the `published` flag.
 
+`interviewer_committee_ids INTEGER[]` names the committees whose members may sign up to **run** interviews in this round. It **fails closed**: NULL or empty means nobody outside eboard, so a round created before this column existed stays shut rather than silently opening.
+
 ### `interview_slots`
 
-One time. `capacity` defaults to **1**, which makes it behave exactly like a Calendly slot: taken means gone. Higher values exist for nights that run several rooms in parallel, so eboard can say "5:00 PM, three seats" rather than entering the same time three times and hoping nobody notices they're indistinguishable.
+One time, with **two independent counts**:
 
-`interviewer_id` is optional and nullable — most chapters decide who runs which slot after signups close.
+| Column | Counts | Default |
+|---|---|---|
+| `capacity` | rushee seats | 1 |
+| `interviewer_capacity` | members who may run it | 1 |
+
+`capacity` defaulting to 1 makes a slot behave exactly like a Calendly slot: taken means gone. Higher values exist for nights that run several rooms in parallel, so eboard can say "5:00 PM, three seats" rather than entering the same time three times and hoping nobody notices they're indistinguishable.
+
+`interviewer_capacity` is a different question — how many people conduct *one* interview — which is why it isn't folded into `capacity`.
+
+:::note `interviewer_id` is gone
+Slots used to carry a single nullable `interviewer_id`, assigned by hand. Interviewers are now rows in `interview_slot_interviewers`, so a slot can have several and members can claim their own.
+
+Migration `1787600000000` backfills every assigned interviewer into the new table but **deliberately leaves the column in place**, because dropping it in the same statement would make every interview query 500 until the new API deployed. It is read and written by nothing; a follow-up migration drops it. If you still see it in the schema, that's why.
+:::
+
+### `interview_slot_interviewers`
+
+One member signed up to run one slot. `UNIQUE (slot_id, user_id)` and **nothing more** — the asymmetry with bookings is the point:
+
+| | Bookings | Interviewer signups |
+|---|---|---|
+| Unique per slot | yes | yes |
+| **Unique per round** | **yes** | **no** |
+
+A rushee holding two times has taken a seat from someone else. An interviewer covering a whole evening is just Tuesday.
 
 ### `interview_bookings`
 
@@ -99,6 +136,54 @@ The `UNIQUE (schedule_id, user_id)` violation is **caught** rather than pre-chec
 Verified by removing `FOR UPDATE`: the slot admitted **3**. A sequential version of that test passes against the broken code, which is why it isn't written that way.
 :::
 
+## Interviewer signup
+
+Eboard decides **which committees** may staff a round and **how many interviewers** each slot takes. Members of those committees then claim slots themselves.
+
+### Who may sign up
+
+Membership of a committee listed in the round's `interviewer_committee_ids`. Eboard and chairs bypass the check — they run interviews by definition.
+
+The route also carries its own `SHARED_ALBUM_GROUPS` gate, **narrower than the router's `RUSH_ACCESSIBLE_GROUPS`**, because rushees must never reach it: they would be able to sign up to interview, and these routes expose the candidate list that the rush-facing query deliberately hides.
+
+:::warning Committee membership is a soft boundary
+`POST /committees/:id/join` is **self-service for any member**, and there is no eboard route to remove someone from a committee — only self-`leave`. So "the pledge committee can see this" means *any member who joins that committee can see it*.
+
+That matters because the interviewer view **does** include rushee names (see below). It is a deliberate choice, not an oversight, but the audience it creates is wider than the committee roster suggests.
+:::
+
+### Claiming a spot is contended, exactly like booking
+
+Two people on the same committee open the page together and click the same slot. `signUpAsInterviewer` therefore uses the identical shape as `book()` — dedicated client, `SELECT … FOR UPDATE` on the slot, count taken **inside** the lock — and returns `{ ok: false, reason }` rather than throwing.
+
+| `reason` | HTTP | Shown as |
+|---|---|---|
+| `full` | 409 | "Someone just took the last interviewer spot for that time." |
+| `already_signed_up` | 409 | "You're already signed up to interview that slot." |
+| `not_published` | **404** | "That slot no longer exists." |
+
+:::danger Ask "am I already in this?" before checking capacity
+On the common `interviewer_capacity` of 1, the person occupying the only spot **is** the reason it's full. Checking capacity first tells them *"someone just took the last interviewer spot"* — the one message they cannot act on, about a spot they hold.
+
+`signUpAsInterviewer` checks for an existing signup first, inside the lock, and answers `already_signed_up`. The `UNIQUE` violation is still caught as the real enforcement; the pre-check exists purely so the message is true.
+
+**`book()` still has this flaw** for rushees on a capacity-1 slot (the default). Known, one line, not yet fixed.
+:::
+
+### What an interviewer sees
+
+`findForInterviewer` returns published rounds their committee is designated on, every slot, who else signed up, and `i_am_interviewing` per slot.
+
+It **includes `bookings` — the rushee names** — which `findAvailableForUser` deliberately omits. The reasoning is that someone about to conduct an interview needs to know who they are meeting. Weigh it against the self-service-join note above.
+
+:::note `i_am_interviewing`, not `mine`
+`mine` already means "I booked this slot as a rushee". One key meaning two things across two audiences is how a disclosure bug gets written, so the interviewer flag has its own name.
+:::
+
+### Withdrawing
+
+`DELETE /interviews/slots/:id/interviewers/:userId` — yours, or anyone's if you manage interviews. A push goes out only when *someone else* removed you.
+
 ## Drafts and publishing
 
 Slots are added **one at a time**, so a schedule is half-built for as long as it takes to enter forty of them. Without `published`, rushees would be grabbing slots out of a list still being typed, and the first arrivals would take everything on day one because day two doesn't exist yet.
@@ -113,7 +198,9 @@ Flipping `published` from false to true sends **one** push notification to every
 
 ## Entering slots
 
-Each slot is created explicitly, which is a lot of typing for an interview night. The mitigation is chaining: **after each save the next slot starts exactly where the previous one ended** and inherits its length, room, capacity and interviewer. A three-hour evening of 20-minute slots is one field of typing and then nine clicks on **Add slot**.
+Each slot is created explicitly, which is a lot of typing for an interview night. The mitigation is chaining: **after each save the next slot starts exactly where the previous one ended** and inherits its length, room, seats and interviewer count. A three-hour evening of 20-minute slots is one field of typing and then nine clicks on **Add slot**.
+
+That chaining is also how a round gets a *de facto* default interviewer count without a per-round setting: set it once on the first slot and it carries.
 
 The prefill is keyed on the last slot's id (`chainedFrom`) so it runs once per added slot — otherwise typing a start time would be overwritten the moment the parent refetched.
 
@@ -144,10 +231,19 @@ They are ids from different tables that both start at 1. A `booking_id ?? slot.i
 
 ## Editing a booked slot
 
-Allowed — a room change is a normal correction — with two guards:
+Allowed — a room change is a normal correction — and eboard does it **in place**: the pencil on a slot row expands into the same fields as the add form. Before August 2026 `PATCH /interviews/slots/:id` existed with no caller, and editing meant delete-and-re-add.
 
-- **Capacity can never drop below the seats already taken.** Checked in the controller rather than by a `CHECK` constraint, because the useful error ("3 people have already booked this") needs a count a constraint can't see across tables to produce.
-- **Moving a booked slot's time notifies everyone in it.** A capacity or interviewer change doesn't affect them and stays silent.
+Three guards:
+
+- **Neither count can drop below what's already claimed.** `capacity` can't go below seats taken, `interviewer_capacity` can't go below signups. Both are checked in the controller rather than by a `CHECK` constraint, because the useful error ("3 people have already booked this") needs a count a constraint can't see across tables to produce. Neither has a `?force` override — unlike deleting, this is a hard stop, so the UI shows it as an explanation beside the field rather than an escalation dialog.
+- **Moving a slot's time notifies both audiences**, in their own words: rushees get "your interview time changed", members get "an interview you're running moved". Changing either count affects nobody and stays silent.
+- **An absent field is left alone; an explicitly empty one is cleared.**
+
+:::warning `COALESCE($n, column)` cannot express "clear this"
+`updateSlot` used to be write-only for its nullable columns: `COALESCE` reads NULL as "keep", so a room could be set and never unset. Choosing *Not decided* or emptying the Room box returned **200 and changed nothing** — a request that looks like it worked.
+
+It now builds its `SET` clause from a fixed column allowlist, so `undefined` means "leave alone" and an explicit `null` means "clear". `updateSchedule` still uses the old pattern for `description`/`location`; nothing edits those yet, but fix it before building a form that does.
+:::
 
 Deleting a booked slot, or a round containing bookings, returns **409 with `code: 'has_bookings'`** and the count. The UI re-asks with that number in the question — "delete this schedule" and "cancel 23 people's interviews" deserve different answers, and only the server knows which one it is. Passing `?force=true` proceeds and notifies everyone it unbooked.
 
@@ -163,7 +259,9 @@ A booked interview lands on the rushee's portal calendar and their [calendar sub
 
 **Only the booker's.** There is no equivalent of the meetings "organiser sees it too" case — the person running interviews wants the sign-up sheet, not forty separate calendar entries. `calendarFeed.test.js` asserts an interviewer does *not* get the slots they're running.
 
-The interviewer's name rides along in the description ("Interview with Ben"), which is why `INTERVIEWER_NAME` uses `CONCAT_WS` rather than the `first_name || ' ' || last_name` idiom used elsewhere in the codebase:
+The interviewers' names ride along in the description ("Interview with Ben"), built by `INTERVIEWER_NAMES` as a **single comma-joined string** under the same `interviewer_name` key it has always used. That shape is kept deliberately: the ICS `DESCRIPTION` and `EventsCalendar.jsx` both consume it, and widening it to an array would have meant changing both for no gain. With several interviewers the calendar shows them as one chip.
+
+It uses `CONCAT_WS` rather than the `first_name || ' ' || last_name` idiom used elsewhere in the codebase:
 
 :::warning `||` with a NULL operand yields NULL
 A member with a first name but no last name falls all the way through to `username` — or to nothing. `CONCAT_WS` skips NULL arguments instead, so "Ben" stays "Ben".
@@ -186,18 +284,32 @@ All under `/interviews`, gated on `RUSH_ACCESSIBLE_GROUPS` at the router, then n
 
 Members can read these too — leadership needs to see the sheet the way a rushee sees it without signing in as one.
 
+### Interviewer signup — members, **never rushees**
+
+Gated `SHARED_ALBUM_GROUPS` at the route, then by committee designation in the controller.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/interviews/interviewer-schedules` | Rounds your committee may staff, with rushee names. `[]` if none |
+| `POST` | `/interviews/slots/:id/interviewers` | Claim a spot. Eboard may pass `{ user_id }` to assign someone |
+| `DELETE` | `/interviews/slots/:id/interviewers/:userId` | Withdraw. Yours, or anyone's if you manage interviews |
+
 ### Management — `eboard` + `chair`
 
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/interviews/schedules` | All rounds, draft included, with counts |
-| `POST` | `/interviews/schedules` | `{ title, description?, location? }` — created as a draft |
+| `POST` | `/interviews/schedules` | `{ title, description?, location?, interviewer_committee_ids? }` — created as a draft |
 | `GET` | `/interviews/schedules/:id` | Full sign-up sheet with names |
-| `PATCH` | `/interviews/schedules/:id` | Also the publish switch |
+| `PATCH` | `/interviews/schedules/:id` | Also the publish switch and the committee list |
 | `DELETE` | `/interviews/schedules/:id` | 409 if booked; `?force=true` overrides |
-| `POST` | `/interviews/schedules/:id/slots` | `{ starts_at, ends_at, location?, capacity?, interviewer_id? }` |
-| `PATCH` | `/interviews/slots/:id` | Capacity can't go below seats taken |
+| `POST` | `/interviews/schedules/:id/slots` | `{ starts_at, ends_at, location?, capacity?, interviewer_capacity? }` |
+| `PATCH` | `/interviews/slots/:id` | Neither count may drop below what's claimed. No `?force` |
 | `DELETE` | `/interviews/slots/:id` | 409 if booked; `?force=true` overrides |
+
+:::note An empty `interviewer_committee_ids` is a real value
+`PATCH` treats an absent key as "leave alone" and an empty array as "close this round to everyone outside eboard". `COALESCE` can't tell those apart, so `updateSchedule` uses an explicit was-it-sent flag for this column.
+:::
 
 `eboard` + `chair` matches [rush announcements](./rush-portal.md): it covers the rush chair however they happen to be modelled — an eboard member with an `exec_title`, or a committee chair — without the route needing to know which.
 
@@ -210,13 +322,16 @@ Rather than a `router.use()` above the management block. A router-level guard wo
 | Constant | Value | Why |
 |---|---|---|
 | `MAX_CAPACITY` | 50 | A slot holding more isn't a slot, it's an event with a start time |
+| `MAX_INTERVIEWERS` | 10 | More than this on one slot is a panel, not an interview |
 | `MAX_SLOTS_PER_SCHEDULE` | 500 | Guards a runaway script, not eboard's typing speed |
 | `MAX_TITLE` | 150 | |
 | `MAX_DESCRIPTION` | 2000 | |
 
 ## Not built
 
-- **Waitlists.** If a slot frees up, whoever refreshes first gets it.
-- **Automatic interviewer assignment.** `interviewer_id` is set by hand, or left null.
+- **The member-facing interviewer page.** `/member/interviews` does not exist yet. The API (`GET /interviews/interviewer-schedules` and the two signup routes) is complete and tested; only the page and its nav entry are missing, so today interviewer signup is reachable by API alone.
+- **Adding an interviewer from the eboard slot form.** Eboard sets the maximum and can *remove* a signup, but the form no longer has a person picker. `POST …/interviewers` accepts `{ user_id }`, so it's a button away.
+- **Waitlists.** If a slot or an interviewer spot frees up, whoever refreshes first gets it.
+- **Automatic interviewer assignment.** Members self-select; nothing balances coverage or warns about an unstaffed slot.
 - **Reminders before the interview.** Only the calendar entry.
 - **Recurring or bulk slot generation.** Deliberate — slot entry is explicit, with the chaining prefill as the ergonomic answer.
