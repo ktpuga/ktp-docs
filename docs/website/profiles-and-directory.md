@@ -37,7 +37,9 @@ Usernames are **display-only everywhere else** — every lookup, foreign key and
 
 ## What you're doing now, and your own links
 
-Two fields added 2026-08-11, both **member-side only** — neither appears on the public `/members-list` roster.
+Two fields added 2026-08-11.
+
+**"What you're doing now" appears on the public roster; links do not.** The original scope was member-side only for both, and the first half was reversed the same day: an alumnus saying what they're up to is the point of a public alumni page, and it shows there between their role and their LinkedIn icon. Links stay members-only, because a list of arbitrary member-supplied URLs rendered as live hrefs is a different kind of exposure from one line of text about yourself. Anyone who would rather not be on that page at all can turn themselves off it entirely, below.
 
 **"What you're doing now"** is one line of free text for what an alumnus is up to after graduation: *"SWE at Google"*, *"Law school at Emory"*, *"Taking a year off"*. Free text rather than a company/title pair precisely so it can hold the second and third of those as comfortably as the first. It shows directly under the badges on a directory card, because for an alumnus it is usually the thing somebody opened the profile to find out.
 
@@ -52,6 +54,22 @@ A link that fails validation renders as **no chip**, rather than a dead or hosti
 :::
 
 A link with a label but no address, or an address with no label, is rejected with a message naming the row. An empty row you added and never filled in is simply dropped, so clicking "Add a link" and changing your mind never fails the save.
+
+## Traits
+
+Eboard can type short **label/value pairs** onto any member: *Concentration: Fintech*, *Hometown: Atlanta, GA*, *Interned at: Delta*. They appear on the member's directory card **and** on the public roster, under their role and above their LinkedIn button.
+
+This generalises the exec title, which is the same idea fixed to one label. Exec titles stay exactly as they are; a trait is additive, a role is not.
+
+Set them from **Admin → Users → Edit** on any member. Up to six, label ≤40 characters, value ≤80.
+
+:::info Why members can't set their own traits
+These land on a page with no authentication, so they are chapter-authored rather than self-authored. That distinction is enforced by the *routes*, not by a permission check: `traits` is deliberately not one of the profile fields, so there is no shape of request to `PUT /users/me/profile` that reaches the column. The only writer is the eboard-only `PUT /admin/users/:id/traits`.
+
+A member's own free-text field is **"What you're doing now"** above — that one is theirs, and it is also public.
+:::
+
+Traits save through their own endpoint, so the edit modal performs two writes behind one Save button. Traits go first on purpose: a rejected trait then leaves the rest of the profile untouched, rather than reporting an error on a form whose other changes have already been committed.
 
 ## Choosing not to be on the public roster
 

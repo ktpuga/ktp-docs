@@ -89,6 +89,16 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 
 Everything except `about_me` **rejects with a `400` naming the field** rather than being shortened or coerced: each of these is something a person is found or addressed by, so half of one is the wrong answer rather than a shorter right one. A blank string clears its column instead of being stored as `''`.
 
+:::warning A key you omit is left alone. A key you send as `null` is cleared.
+These are different, and the difference used to be **data loss**. This route is an upsert that wrote every column on every call, so a client sending a subset of the fields nulled the rest.
+
+The iOS app sends five profile keys. Everyone except alumni was protected **by accident** — it sends no `email`, and a non-alumnus must have a UGA address, so the request `400`s before the write. Alumni don't need that address, so their save succeeded and erased their bio, phone, personal email, LinkedIn, pledge class, date of birth, "doing now" and links in a single tap.
+
+Since 2026-08-11 the API tracks which keys were actually present in the body and writes only those. `first_name` and `last_name` remain required.
+
+**If you are writing a client, this means you can safely send a partial profile** — but you must send an explicit `null` for anything you intend to clear. The website always sends every key, which is why its behaviour is unchanged.
+:::
+
 :::warning `links` refuses rather than repairing, in three separate ways
 Each rule is aimed at a specific way this could have failed quietly.
 
@@ -180,6 +190,18 @@ Never touches Authentik — revoking real chapter/SSO access is a separate, eboa
 
 `profile_picture_asset_id` is there so the client can version the avatar URL; see [`GET /roster`](#get-roster) below for why every projection that carries a member id needs to carry it too.
 
+### `PUT /admin/users/:authentikId/traits`
+
+**Eboard only.** Body `{ "traits": [{ "label": "Concentration", "value": "Fintech" }] }` → `{ traits }`. Up to **6**, label ≤40, value ≤80. Sending `[]` clears them; there is no separate delete.
+
+Traits appear on the member's directory card and on the **public** roster, under their role. They generalise `exec_title`, which stays as it is.
+
+:::info "Eboard-only" here means no other route can write them
+`traits` is deliberately **not** in `PROFILE_FIELDS`. That list is shared by `PUT /users/me/profile` and `PUT /admin/users/:id/profile`, so a key added there is settable by the member as well as by eboard — and these land on a page with no authentication. Making the boundary "which routes exist" rather than "which routes check" is what stops a future edit to a shared list quietly turning them self-service.
+:::
+
+Rejects rather than repairs, exactly like `links`: a non-array is refused rather than coerced, one bad entry rejects the whole list, and both halves of a pair are required. The message names the offending row by its label.
+
 ### `PUT /users/me/roster-visibility`
 
 **Auth required.** Body `{ "visible": true | false }` → `{ show_on_public_roster }`. Controls whether the caller appears on the **public** roster at `/members-list`.
@@ -251,7 +273,9 @@ Backs the public "meet the chapter" page at `/members-list`. **No auth at all** 
 
 ### `GET /roster`
 
-Returns `{ eboard: [...], chair: [...], active: [...], alumni: [...] }`. Each entry is `{ id, firstName, lastName, preferredName, execTitle, chairedCommittees, profilePictureAssetId }`.
+Returns `{ eboard: [...], chair: [...], active: [...], alumni: [...] }`. Each entry is `{ id, firstName, lastName, preferredName, execTitle, chairedCommittees, profilePictureAssetId, doingNow }`.
+
+`doingNow` is the member's own free text about what they're doing after graduation, rendered on the public card between their role and their LinkedIn icon. Only alumni are asked for it, so it is `null` for nearly everyone else. **It was deliberately withheld from this endpoint when the column shipped and that decision was reversed on 2026-08-11** — an alumnus saying "SWE at Google" is the point of a public alumni page. `links` was *not* part of that reversal and stays members-only: a list of arbitrary member-supplied URLs rendered as live hrefs is a different exposure from one line of text about yourself.
 
 Excluded from the results:
 - **Pledges** — the public page shows initiated members only
