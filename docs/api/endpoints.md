@@ -614,6 +614,32 @@ An omitted key is left alone; an explicit `null` or `""` clears that field. The 
 
 **Eboard only.** Only unlists the photo from the gallery — does **not** delete the underlying Immich asset, since a registered asset might be reused elsewhere.
 
+### `GET /homepage-photos/collections`
+
+**Public.** Named groups over the gallery, each with its photos nested. `?featured=true` returns only the collections eboard put on the homepage, capped server-side.
+
+Ordered by `display_order`, then `event_date` newest-first, then `id`. `event_date` is what makes it chronological — `created_at` would file last autumn's photos under the semester they were uploaded in. An undated collection sorts **last**, since it is unplaced rather than ancient.
+
+:::note The `featured` cap is a performance rule
+`/homepage-photos/:id/media` streams the **original** asset and there is no thumbnail variant, so every collection added to the landing page makes it permanently slower. The homepage takes the featured few; the website's `/gallery` page carries the full archive.
+:::
+
+### `GET /homepage-photos/collections/manage`
+
+**Eboard only.** The same list with `photo_count` in place of the photos — the management screen renders a number, and fetching every asset id to display one is waste.
+
+### `POST` / `PUT` / `DELETE /homepage-photos/collections`
+
+**Eboard only.** `{ title, subtitle?, event_date?, link_url?, link_label?, is_featured? }`. `PUT` is partial: an omitted key is left alone, an explicit `null` clears it.
+
+`link_url` must be **https**, checked with `services/urls.js` and not merely `new URL()` — this becomes an `href` on a public page, the widest audience any link in this codebase gets. A `link_label` with no `link_url` is refused, since it would render a button that goes nowhere.
+
+`DELETE` answers **409** with `code: "has_photos"` and a `photo_count` unless `?force=true`. Deleting a collection **takes its photos with it** (`ON DELETE CASCADE`); the Immich assets survive.
+
+:::warning Route order, not style
+`PUT /homepage-photos/:id` matches a single path segment — so it also matches `/collections`. Registered first it silently swallows `PUT /homepage-photos/collections` and tries to update a photo whose id is the string `"collections"`. Every `/collections` route sits **above** the `/:id` routes in `routes/homepagePhotos.js`, and there is a test asserting it, because Express gives no warning and the mistake is invisible in a diff that appends a route.
+:::
+
 ---
 
 ## Documents

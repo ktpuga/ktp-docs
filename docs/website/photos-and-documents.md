@@ -111,6 +111,30 @@ A completely separate system from the two above — the "Chapter Gallery" sectio
 - Reorder photos via up/down buttons (`display_order`).
 - Removing a photo only unlists it from the gallery — it does not delete the underlying Immich asset, since that asset might be reused elsewhere.
 
+### Collections
+
+Photos are grouped into named **collections**, so eboard can run several galleries side by side ("Spring Formal 2026", "Hackathon Fall 2025") instead of one flat list everything piles into. The manager shows them as a bar of pills; picking one scopes the grid, the reordering, the bulk actions and any new uploads to that collection.
+
+Each collection has a title, an optional subtitle, an optional event date, an optional link with its own label, and a "show on the homepage" toggle.
+
+:::note Two surfaces, one set of collections
+The **homepage** shows only the collections marked as featured, and only a few of them. The **`/gallery` page** shows all of them, newest first.
+
+That split is a performance rule rather than a design preference. The media endpoint serves the **original** file — there is no thumbnail variant — so every collection added to the landing page makes it permanently slower for every visitor. `/gallery` is a page somebody chooses to open, so it can carry the full archive.
+:::
+
+:::warning The event date is what orders the gallery, not the upload date
+Set it to **when the event happened**. Eboard uploads last autumn's photos in spring, and ordering by upload time would file them under the wrong semester and push them above everything newer.
+
+A collection with no date is treated as unplaced and sorts last, rather than as the oldest thing on the page.
+:::
+
+**Deleting a collection deletes its photos.** The API refuses the first attempt and answers with the real count, so the confirmation says "12 photos are in this collection" rather than guessing. The originals stay in Immich either way.
+
+Nothing was lost when this shipped: the migration filed every existing photo into one "Chapter Gallery" collection, so the homepage rendered identically the moment it ran.
+
+**The old hardcoded "Hackathon Highlights" section is now one of these collections.** It used to be a fixed array of images and a hand-written subtitle in `components/template-page.jsx`, which meant a developer and a deploy to change it every year. The original is still in that file, commented out, in case it needs to be put back.
+
 ---
 
 ## iOS homepage slideshow
