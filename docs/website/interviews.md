@@ -147,7 +147,7 @@ Membership of a committee listed in the round's `interviewer_committee_ids`. Ebo
 The route also carries its own `SHARED_ALBUM_GROUPS` gate, **narrower than the router's `RUSH_ACCESSIBLE_GROUPS`**, because rushees must never reach it: they would be able to sign up to interview, and these routes expose the candidate list that the rush-facing query deliberately hides.
 
 :::warning Committee membership is a soft boundary
-`POST /committees/:id/join` is **self-service for any member**, and there is no eboard route to remove someone from a committee — only self-`leave`. So "the pledge committee can see this" means *any member who joins that committee can see it*.
+**This changed on 2026-08-11.** `POST /committees/:id/join` used to be self-service for any member, with no eboard route to remove anyone — so "the pledge committee can see this" really meant *any member who joins that committee can see it*, and that included seeing rushee names. Joining now creates a **request** that eboard or the committee chair approves, and removal exists. See [Committees](./overview.md#committees).
 
 That matters because the interviewer view **does** include rushee names (see below). It is a deliberate choice, not an oversight, but the audience it creates is wider than the committee roster suggests.
 :::

@@ -53,7 +53,15 @@ The portals share a core feature set wired to the same backend, with permissions
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
-- **Committees** — browse committees and member counts; join/leave any committee yourself; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
+- **Committees** — browse committees and member counts; **request** to join a committee (eboard or that committee's chair approves) and leave any you are on; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
+
+:::warning Joining a committee is not cosmetic, which is why it needs approval
+A committee membership row grants the committee **group chat with its history**, read access to **everything restricted to that committee** (albums, folders, documents, events, meetings, announcements, polls), and eligibility to **run interviews**, which exposes rushee names.
+
+Until 2026-08-11 anyone could grant themselves all of that by clicking Join, and nobody could take it back. Now the button says **Request to Join**, the request grants nothing on its own, and eboard or that committee's chair approves it. Chairs and eboard can also remove a member, which was previously impossible.
+
+A pending request is stored separately from membership on purpose — putting it in the members table with a status flag would have granted the access at the moment of asking.
+:::
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
