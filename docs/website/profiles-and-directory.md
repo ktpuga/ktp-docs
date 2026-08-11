@@ -35,6 +35,34 @@ Usernames are **display-only everywhere else** — every lookup, foreign key and
 
 ---
 
+## What you're doing now, and your own links
+
+Two fields added 2026-08-11, both **member-side only** — neither appears on the public `/members-list` roster.
+
+**"What you're doing now"** is one line of free text for what an alumnus is up to after graduation: *"SWE at Google"*, *"Law school at Emory"*, *"Taking a year off"*. Free text rather than a company/title pair precisely so it can hold the second and third of those as comfortably as the first. It shows directly under the badges on a directory card, because for an alumnus it is usually the thing somebody opened the profile to find out.
+
+**Links** are up to five labelled URLs, shown as chips at the bottom of the card. The row wraps and re-spaces as links are added.
+
+Only alumni are *asked* for the "doing now" field, but the column is on every member and the API validates it for everyone. That is deliberate and follows `about_me`: a column gated to one group has to be migrated the day somebody changes group, which happens here every spring. Eboard's edit-anyone modal shows both fields for everybody, since the point of that modal is correcting what someone typed into the wrong box.
+
+:::warning Links are an href, which is not the same as text
+Every link URL is validated and stored canonicalised by the API, and validated *again* by the website before it is rendered. That is not redundancy for its own sake. React escapes a hostile string rendered as text, and does nothing whatsoever about `javascript:` inside an `href` — and `new URL()` is not a check either, since it parses `javascript:alert(1)` perfectly happily. This exact pair was already got wrong once in document links.
+
+A link that fails validation renders as **no chip**, rather than a dead or hostile one.
+:::
+
+A link with a label but no address, or an address with no label, is rejected with a message naming the row. An empty row you added and never filled in is simply dropped, so clicking "Add a link" and changing your mind never fails the save.
+
+## Choosing not to be on the public roster
+
+**Settings → Public Roster** controls whether a member appears on [ugaktp.com/members-list](https://ugaktp.com/members-list), the chapter page anyone on the internet can load. Everyone is on it by default, exactly as before this setting existed.
+
+Turning it off does two things, and the second is the one that matters: the member disappears from the list, **and** their photo stops being served from the public media route. Hiding someone from the list alone would leave their picture fetchable by anyone who knew their id, which is a promise the toggle would not be keeping.
+
+Nothing inside the portal changes. They stay in the member directory, keep their profile, and everything else they filled in was never public in the first place. Before this shipped, the only way off the roster was to delete your profile picture, which also removed you from the directory everybody actually uses.
+
+---
+
 ## Profile pictures
 
 Members upload a profile picture from **Settings** (or during onboarding at `/complete-profile` — both use the same shared `ProfileForm` component). Uploading happens immediately on file select, independent of the rest of the profile form's save button — you don't need to click a separate "Save" to update just your picture.
@@ -48,6 +76,17 @@ The fallback is implemented with a plain `<img>` and an `onError` handler throug
 :::
 
 A profile picture is also what gets a member onto the [public roster](./overview.md#public-roster-members-list) — members without one are excluded from that page entirely.
+
+### Changing a picture updates it everywhere, and that took work
+
+Until 2026-08-11, changing your photo appeared not to work. The upload succeeded every time; what you were looking at was cache. The media proxy sends no `Cache-Control` and its URL is keyed on the member id alone, so the address of your picture was identical before and after the change and the browser had no reason to fetch it again. Every avatar in the portal was affected, plus the public roster.
+
+The fix is a version on the URL, and the version is the **Immich asset id**. Immich issues a new asset per upload, so it changes exactly when the picture does and never in between. That last part matters as much as the first: a timestamp would also have busted the cache, and would have re-downloaded every avatar in the directory on every page load forever.
+
+All of it lives in `lib/avatar.js` on the website. Two consequences worth knowing:
+
+- **API responses now carry the asset id wherever they carry a member id**, including the public roster (`profilePictureAssetId`) and the blocked-members list (`profile_picture_asset_id`). A projection that omits it silently reverts the fix for that one surface, so it is covered by a test rather than by convention.
+- **The sidebar updates without a refresh.** It sits in a layout that reads your profile once per full page load, so a new URL alone would not have reached it. The upload broadcasts an event and the sidebar re-reads.
 
 ---
 

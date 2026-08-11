@@ -84,8 +84,22 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 | `linkedin_url` | Validated and canonicalised on write; a bad value is a `400` |
 | `pledge_class` | ≤50 |
 | `about_me` | Free text, **truncated** to 600 rather than rejected |
+| `doing_now` | ≤150. What a member is doing after graduation. Only the alumni form renders it, but the rule applies to every caller — a check gated by group as well as by form disappears the moment somebody calls this route directly |
+| `links` | Up to **5** entries of `{ label, url }`. Label required, ≤40. URL validated as an href, ≤300, stored canonicalised. See below |
 
 Everything except `about_me` **rejects with a `400` naming the field** rather than being shortened or coerced: each of these is something a person is found or addressed by, so half of one is the wrong answer rather than a shorter right one. A blank string clears its column instead of being stored as `''`.
+
+:::warning `links` refuses rather than repairing, in three separate ways
+Each rule is aimed at a specific way this could have failed quietly.
+
+**A non-array is rejected, not coerced.** Interviews shipped the opposite and it was the worst bug in that feature: a non-array fell into the same branch as an empty list, so sending `"3"` instead of `[3]` returned `200` having silently closed the round. The same silence here would be a member's links vanishing on save.
+
+**One bad entry rejects the whole list.** Storing four of five returns `200` to somebody who is never told which one didn't make it. The message names the offending row by its label — the API cannot know which input on the form that row became, so it says `"Portfolio: Links must start with http:// or https://"`.
+
+**An absent key means `[]`, not null.** The column is `NOT NULL`, and this route is a whole-row upsert, so absent has to resolve to something storable.
+
+A scheme-less host like `example.com/me` is accepted and canonicalised to `https://example.com/me`, because that is what people paste. `javascript:`, `data:` and every other non-http(s) scheme are refused — these become `<a href>` on a directory card, and `new URL()` is not a check, since it parses `javascript:alert(1)` happily.
+:::
 
 :::info `dob` is the only real `DATE` column, and it is the only one whose bad values used to be `500`s
 An empty string is `22007` and `2004-02-30` is `22008` — both abort the statement rather than storing a bad row, and the controller turns a thrown query into a `500`. The API now answers `400` instead.
@@ -162,7 +176,23 @@ Never touches Authentik — revoking real chapter/SSO access is a separate, eboa
 
 ### `GET /users/blocked`
 
-**Auth required.** The caller's own block list — people they've blocked, not people who've blocked them.
+**Auth required.** The caller's own block list — people they've blocked, not people who've blocked them. Each entry is `{ id, username, first_name, last_name, preferred_name, profile_picture_asset_id }`.
+
+`profile_picture_asset_id` is there so the client can version the avatar URL; see [`GET /roster`](#get-roster) below for why every projection that carries a member id needs to carry it too.
+
+### `PUT /users/me/roster-visibility`
+
+**Auth required.** Body `{ "visible": true | false }` → `{ show_on_public_roster }`. Controls whether the caller appears on the **public** roster at `/members-list`.
+
+Self-service only, by design: there is no eboard equivalent. `is_test_account` already covers accounts that should never be listed, and a member's own answer to "may my name and face be on the open internet" should not be overridable from an admin form.
+
+:::info Why this isn't a field on `PUT /users/me/profile`
+That route is a **whole-row upsert** — every absent key becomes `NULL`. This column is `NOT NULL`, so a client that doesn't know about it would either fail the save outright or flip somebody's answer. The iOS app sends five profile keys. Username and profile picture are separate endpoints for the same class of reason.
+
+The boolean is **type-checked, not coerced**. `Boolean(req.body.visible)` on a missing key is `false`, which would quietly remove a member from a public page because a client sent the wrong field name. A wrong type is a `400` naming the field.
+:::
+
+Turning it off removes the member from the list **and** stops `/roster/:id/media` serving their photo. Both are needed: the media route re-checks eligibility rather than merely resolving the id, and filtering only the list would leave every opted-out photo fetchable one id at a time.
 
 ### `POST /users/:id/block`
 
@@ -221,7 +251,7 @@ Backs the public "meet the chapter" page at `/members-list`. **No auth at all** 
 
 ### `GET /roster`
 
-Returns `{ eboard: [...], chair: [...], active: [...], alumni: [...] }`. Each entry is `{ id, firstName, lastName, preferredName, execTitle, chairedCommittees }`.
+Returns `{ eboard: [...], chair: [...], active: [...], alumni: [...] }`. Each entry is `{ id, firstName, lastName, preferredName, execTitle, chairedCommittees, profilePictureAssetId }`.
 
 Excluded from the results:
 - **Pledges** — the public page shows initiated members only
@@ -230,6 +260,12 @@ Excluded from the results:
 - **Anyone without a profile picture** — a deliberate incentive to upload one
 
 `execTitle` is only ever populated for eboard. `chairedCommittees` is an array, since one person can chair more than one committee.
+
+:::info Why the asset id is in a public response
+`profilePictureAssetId` is not a second copy of the photo. It is the cache key for it. `/roster/:id/media` is keyed on the member id alone, so its URL is byte-identical before and after somebody replaces their picture, and the proxy forwards no `Cache-Control` — the browser keeps serving the old one until a hard refresh. Immich issues a **new** asset per upload, so the id is the one value that changes exactly when the picture does, and the client appends it as `?v=`.
+
+Publishing it costs nothing here: it is an opaque Immich uuid, and the media route ignores it entirely, so it grants no access the already-public endpoint didn't. Anything that hands out a member id for drawing an avatar should hand out this alongside it — a projection that omits it doesn't error, it just pins that surface to a stale photo forever. `ktp-api/test/avatarAssetIds.test.js` pins this endpoint and `GET /users/blocked` against exactly that.
+:::
 
 ### `GET /roster/:id/media`
 
