@@ -233,7 +233,9 @@ Turning it off removes the member from the list **and** stops `/roster/:id/media
 **Auth required.** Returns a list of members. Supports optional `?group=` query param to filter by `member_group`.
 
 **Query params:**
-- `group` — one of `active`, `pledge`, `eboard`, `chair`, `alumni`
+- `group` — one of `active`, `pledge`, `eboard`, `chair`, `alumni`, `rush`
+
+`rush` is the odd one. Rushees are **never** in the unfiltered response — asking for them by group is the only way to get them, and even then only if the caller's own group permits it (otherwise the list comes back empty, not 403). The website's directory makes exactly this second call to fill its Rushees tab. See [Rushees in the member directory](../website/rush-portal.md#rushees-in-the-member-directory).
 
 **Response:**
 ```json

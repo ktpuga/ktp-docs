@@ -128,7 +128,7 @@ Once every field validates, it is not: a phone number with too few digits, a gra
 ## Member Directory
 
 :::note LinkedIn buttons (2026-08-05)
-Members with a LinkedIn URL get a link under their name in three places: the directory row, the directory profile modal, and their card on the public `/members-list` roster (where `ProfileCard` already had a LinkedIn slot that nothing was filling).
+Members with a LinkedIn URL get a link under their name in the directory profile modal and on their card on the public `/members-list` roster (where `ProfileCard` already had a LinkedIn slot that nothing was filling). It used to sit on the directory row as well; the card grid that replaced those rows carries only the fields listed below, so the modal is now the one place it appears inside the portal.
 
 `linkedin_url` was added to `memberModel`'s `findAll`, `findById` and `findPublicRoster` projections — it had been stored since the beginning but selected by none of them.
 
@@ -137,7 +137,49 @@ Members with a LinkedIn URL get a link under their name in three places: the dir
 On the public roster this is the only contact-ish field — still no email, phone, major or pledge class. A LinkedIn profile is already a public professional page, and that roster exists to be found.
 :::
 
-`/member/directory` and `/pledge/directory` list chapter members (name, major, pledge class, graduation, group badge). `/admin` has no Directory — eboard uses User Management instead.
+`/member/directory`, `/pledge/directory` and `/admin/directory` list chapter members (name, `@username`, major, pledge class, and a role line for eboard and chairs). All three are the same `components/portal/MemberDirectory.jsx`; only the title, blurb and accent differ.
+
+### A tab bar over a grid of profile cards (2026-08-11)
+
+The directory used to be one scrolling table with a heading rule between each group. It is now a tab bar, one tab per group in `MEMBER_GROUP_ORDER` (**E-Board, Chairs, Members, Pledges, Alumni, Rushees**), over a responsive grid of profile cards. Same data, same profile modal on click.
+
+Three things fall out of the tabs:
+
+- **A group with nobody in it gets no tab.** This is what replaced the rush-count check that used to gate the old sidebar entry: out of season, or for a viewer the API withholds rushees from, the rush half of the fetch is empty and the tab isn't drawn. No permission branch in the component, and none needed.
+- **The count line under the grid follows the open tab.** It reads "N rushees signed up" on the rush tab and "N of M members in chapter" everywhere else. That total excludes rushees deliberately: they now arrive in the same fetch, so a plain `members.length` would quietly report a bigger chapter than there is. With a search term on screen it reads "N of M matching …" instead, because the number under a list should be the length of the list above it.
+- **The active tab is derived, not stored.** `chosenGroup` is only a preference; the tab actually rendered is the first one that still exists. A chapter that loses its last rushee mid-session falls back rather than staring at a tab that isn't there.
+
+#### The card
+
+A card carries the photo, the name, `@username`, major, pledge class, and the exec title or chaired committees, and **deliberately no group badge** — the tab you are on already says the group, and repeating it on all 61 cards is noise. The modal still shows one.
+
+Every field except the name can be null, and on the Rushees tab the pledge class is null for **everyone**, so that whole tab renders the sparse variant. Each block is conditional and the card is centred, which is what lets a photo-and-name-only card still look composed rather than broken. There are no dash placeholders on a card; those belong to table cells.
+
+The role line is coloured by the **portal accent**, not the member group's colour. Only around 14 of ~94 people have a role at all, so colouring it by group would put a second group marker on exactly the cards that least need one.
+
+Members who have never uploaded a photo get **initials on a gradient seeded from their id** (`lib/seed.js`, the same djb2 helper behind the empty-album covers). A tab of 60 rushees is mostly initials, and one accent colour for all of them is 60 identical circles with nothing to catch the eye on. The seed is the id, so a member's tile is the same colour on the card and in the modal it opens, on every device and every reload.
+
+#### Group colours that survive dark mode
+
+The six `GROUP_COLOR` swatches were picked to sit on a white card: dark and saturated, which is exactly wrong on a dark one. The first tab bar ducked that by keeping every label on `text-foreground` and letting the colour appear only in a 2px underline, so group identity barely read at all.
+
+`readableGroupText(hex, dark)` keeps the hue, which is the identity, and re-derives only the lightness for the theme on screen: light mode holds the swatch near 34% L with a saturation floor, dark mode lifts it to 70% and pulls saturation back so a bright hue on near-black doesn't vibrate. Deriving beats a second hardcoded palette — a group added to `GROUP_COLOR` gets its dark variant for free, and the two can't drift. The same function now colours the group badge in the profile modal, which had the identical problem.
+
+Structurally, **every tab carries a solid dot in its group's hue whether it is selected or not.** Colouring only the active tab leaves five of the six unlabelled at any moment.
+
+#### Search, sort, and the phone
+
+**Search** filters within the open tab, on name and `@username`. It exists for the Rushees tab, where 60+ cards is past the point where scanning works. The tabs are built from the unfiltered groups, so searching can never make a tab vanish underneath the person typing.
+
+**Sort** is still the one control it always was: last name, ascending or descending.
+
+Six tabs with counts do not fit a phone, and the first version was a bare horizontally scrolling row with no sign that anything lay past the right edge. It now has scroll-snap, a fade on whichever side has more to show, and a chevron button that appears and disappears with it. The fades resolve to `card`, not `background`: the tab bar sits inside the directory panel, and fading to the page colour would draw a pale block across it.
+
+:::note The directory makes two API calls, not one
+`/members` deliberately omits rushees (see [Rush portal](./rush-portal.md#rushees-in-the-member-directory)), so a directory that wants a Rushees tab has to ask for them separately. `getMemberDirectoryWithRushees` in `lib/portal-api.js` fires both and concatenates, so the browser still makes one round trip.
+
+The rush half is allowed to fail and returns `[]`. The API already answers `[]` rather than 403 for a caller who may not see rushees, so a rejection there means a real backend problem — and that should cost the Rushees tab, not the whole directory. A `NEXT_REDIRECT` still propagates, or the page renders that string instead of navigating.
+:::
 
 Clicking any member opens a **profile view** — a modal with their photo, group, major, pledge class, graduation date, and email, plus:
 

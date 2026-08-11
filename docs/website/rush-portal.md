@@ -67,10 +67,12 @@ See [Rush Signup](./rush-signup.md).
 
 ## Rushees in the member directory
 
-Rushees appear in **one** place: the dedicated **Rushees** tab. They were removed from the main directory on 2026-08-04 — a rushee is a prospective member, and mixing them into the chapter roster made "who is actually in this chapter" a question you had to read badges to answer.
+Rushees appear in **one** place: the **Rushees** tab of the member directory. They were pulled out of the undifferentiated chapter list on 2026-08-04 — a rushee is a prospective member, and mixing them in made "who is actually in this chapter" a question you had to read badges to answer.
+
+That separation survived the 2026-08-11 rework, which turned the whole directory into [a tab bar over a grid of profile cards](./profiles-and-directory.md#a-tab-bar-over-a-grid-of-profile-cards-2026-08-11), one tab per member group. Rushees are simply the last tab now instead of a separate page — still their own list, never blended into the chapter's.
 
 :::note The exclusion is in SQL, and it's two conditions
-`memberModel.findAll` only returns rushees when they are **explicitly asked for by group** (`?group=rush`, which the Rushees tab sends):
+`memberModel.findAll` only returns rushees when they are **explicitly asked for by group** (`?group=rush`, which the directory's second call sends):
 
 ```js
 if (!includeRush || groupFilter !== "rush") {
@@ -87,13 +89,17 @@ Visible to **every member group** (`RUSH_VISIBLE_TO` in `membersController`). Th
 
 ### The Rushees tab appears and disappears on its own
 
-`GET /members/rush-count` returns `{ count }`, and each portal layout shows the tab only when it's above zero — so it's there during rush and gone the rest of the year with no toggle to remember.
+It's there during rush and gone the rest of the year, with no toggle to remember. **How that works changed on 2026-08-11** — the mechanism is now the same one that hides an empty Alumni tab, rather than anything rush-specific.
 
-It returns **0 rather than 403** for anyone who may not see rushees, so a layout needs no permission branch: "no rushees" and "not allowed" collapse into the same answer. `getRushCount` also swallows its own errors, because this runs on every page of every portal and a backend hiccup must hide a tab, not break the sidebar.
+**Now:** the directory draws a tab only for a group it actually has people in. `/members` never returns rush rows, so the directory asks for them separately (`getMemberDirectoryWithRushees`); out of season, or for a viewer the API withholds them from, that call comes back empty and there is no tab. No permission branch in the component, because "no rushees" and "not allowed" produce the identical empty list.
 
-The page is `MemberDirectory` with `onlyGroup="rush"`, not a second directory — same profile modal, About Me, search and sort, nothing extra to keep in sync.
+**Before:** **Rushees** was a sidebar entry of its own in all three portals, gated on `GET /members/rush-count > 0`, pointing at `/member/rushees`, `/pledge/rushees` and `/admin/rushees` — each of them `MemberDirectory` with `onlyGroup="rush"`. Those three pages, the `onlyGroup` prop, the `useRushCount` hook and the `getRushCount` server action are all deleted.
 
-`onlyGroup === 'rush'` also drops the **Pledge Class** column (a rushee has no pledge class — that's what they're rushing for, so the column was a full width of dashes) and changes the footer count from "members in chapter" to "rushees signed up". The section-heading `colSpan` follows the column count, or the heading rule stops short of the table edge.
+:::warning `GET /members/rush-count` still exists and now has no caller
+The endpoint is unchanged and still returns **0 rather than 403** for anyone who may not see rushees. Nothing in the website reads it any more. It was left in place rather than removed with the website change — if you want it gone, that's an API change to make deliberately, not a leftover to assume is load-bearing.
+:::
+
+The Rushees tab also drops the **Pledge Class** column (a rushee has no pledge class — that's what they're rushing for, so the column was a full width of dashes) and reads "N rushees signed up" where the other tabs read "N of M members in chapter".
 
 :::warning GROUP_ORDER must match roleGroups.js — this has now bitten twice
 `MemberDirectory` bucketed rushees into **Active** because its `GROUP_ORDER` had no `rush`. The identical omission in `UserManagementPage`'s own `GROUP_ORDER` then showed every rushee to eboard as **"unassigned"** — `normalizeGroup()` falls back to that for anything not in the list.

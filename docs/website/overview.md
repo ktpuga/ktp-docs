@@ -49,7 +49,7 @@ Two things deliberately stay hardcoded and should not be converted: **member-gro
 
 ## Shared features across portals
 
-The portals share a core feature set wired to the same backend, with permissions differing by group. Two deliberate exceptions: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden), and **`/admin` has no Directory** — eboard uses User Management instead.
+The portals share a core feature set wired to the same backend, with permissions differing by group. One deliberate exception: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden).
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
@@ -65,7 +65,7 @@ A pending request is stored separately from membership on purpose — putting it
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
 - **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
-- **Directory** — browse members, view a profile, start a conversation, request a meeting. Available in `/member` and `/pledge` ([Profiles & Directory](./profiles-and-directory.md))
+- **Directory** — browse members, view a profile, start a conversation, request a meeting. One tab per member group (E-Board, Chairs, Members, Pledges, Alumni, and Rushees during rush). Available in `/member`, `/pledge` and, since 2026-08-11, `/admin` ([Profiles & Directory](./profiles-and-directory.md))
 - **Meetings** — request time with a member or a group; they accept or decline, and it lands on both calendars ([Meetings](./meetings.md))
 - **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))
 - **Settings** — edit your own profile (including profile picture, UGA and personal email, and an About Me), subscribe your calendar, review your blocked members (only shown if you have any), delete your account ([Safety & Moderation](#safety--moderation))
