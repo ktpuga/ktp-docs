@@ -71,15 +71,27 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 **Auth required.** Saves profile fields and sets `profile_complete = true`. JSON body — this route has no file upload, so it is **not** multipart; only `/users/me/profile-picture` below is.
 
 **Body fields** — `first_name` and `last_name` are required, the rest optional:
-- `first_name`, `last_name`, `preferred_name`
-- `dob` — date of birth
-- `major`
-- `graduation_date` — string like "Spring 2026" (the form combines semester + year before sending)
-- `phone`
-- `email` (the UGA address), `personal_email` — **`email` is ignored for alumni.** The profile form doesn't render a UGA Email input for them, and this route is a whole-row upsert where every absent key becomes `NULL`, so the API preserves the stored value instead of taking it from the payload. That guard is at the write, not in the form, so a hand-written `PUT` carrying `email` won't set one either. See `GET /members` above for why alumni have no UGA address
-- `linkedin_url` — validated and canonicalised on write; a bad value is a `400`
-- `pledge_class`
-- `about_me` — free text, **truncated** to 600 rather than rejected
+
+| Field | Rule |
+|---|---|
+| `first_name`, `last_name` | Required, 100 characters or fewer. **Trimmed before the required check**, so `"   "` is not a name |
+| `preferred_name` | ≤100 |
+| `dob` | `YYYY-MM-DD`, a real calendar date, between `1900-01-01` and today |
+| `major` | ≤120 |
+| `graduation_date` | A **semester and a year**, like `"Spring 2026"` — `Spring`, `Summer`, `Fall` or `Winter` plus four digits in 1900–2100. The form combines a dropdown and a year box before sending |
+| `phone` | Digits and `+ ( ) - . space`, **7 to 15 digits**. Stored exactly as typed |
+| `email` (the UGA address), `personal_email` | **`email` is ignored for alumni.** The profile form doesn't render a UGA Email input for them, and this route is a whole-row upsert where every absent key becomes `NULL`, so the API preserves the stored value instead of taking it from the payload. That guard is at the write, not in the form, so a hand-written `PUT` carrying `email` won't set one either. See `GET /members` above for why alumni have no UGA address |
+| `linkedin_url` | Validated and canonicalised on write; a bad value is a `400` |
+| `pledge_class` | ≤50 |
+| `about_me` | Free text, **truncated** to 600 rather than rejected |
+
+Everything except `about_me` **rejects with a `400` naming the field** rather than being shortened or coerced: each of these is something a person is found or addressed by, so half of one is the wrong answer rather than a shorter right one. A blank string clears its column instead of being stored as `''`.
+
+:::info `dob` is the only real `DATE` column, and it is the only one whose bad values used to be `500`s
+An empty string is `22007` and `2004-02-30` is `22008` — both abort the statement rather than storing a bad row, and the controller turns a thrown query into a `500`. The API now answers `400` instead.
+
+The value also stays a **string** all the way to Postgres. A JavaScript `Date` is serialised with the server's local offset, so a date-only value written that way lands a day early anywhere west of UTC: from a UTC-4 machine, `"2004-05-14"` stores `2004-05-14` and `new Date("2004-05-14")` stores `2004-05-13`.
+:::
 
 **Response:** the saved profile row.
 
@@ -462,7 +474,7 @@ Withdraw. Yours, or anyone's for eboard + chair. A push goes out only when someo
 
 **Eboard + chair.** Also the publish switch and the committee list. Flipping `published` false → true sends one push to every current rushee; re-saving an already-published round does not.
 
-An absent `interviewer_committee_ids` leaves it alone; an **empty array closes the round** to everyone outside eboard.
+An absent `interviewer_committee_ids` leaves it alone; an **empty array closes the round** to everyone outside eboard. Anything that is neither, including a bare `"3"` or a list holding one malformed id, is a `400`. It used to be read as the empty array, so a typo shut the round instead of failing.
 
 ### `DELETE /interviews/schedules/:id`
 
@@ -507,6 +519,8 @@ Visible polls for the caller (or all, if eboard), each with its options, aggrega
 }
 ```
 `options` needs at least 2. `expires_at` is optional — voting closes automatically at that time with no cron job involved (see `GET /polls` above). Omit for a poll that only closes when eboard manually closes it.
+
+`audience` accepts the same values as an announcement, `rush` included, and rejects anything else with a 400. Rushees vote only in polls that name `rush` explicitly.
 
 ### `DELETE /polls/:id`
 
@@ -646,7 +660,7 @@ Same file, but `Content-Disposition: inline` — used for the in-portal preview 
 
 ## Announcements
 
-Eboard-only broadcast — one-way, no replies. Any shared-album-group member can view (filtered by audience). Same targeting shape as Events: `audience` is an array, or scope to one `committee_id` instead.
+Eboard-only broadcast — one-way, no replies. Any rush-accessible member can view (filtered by audience). Same targeting shape as Events: `audience` is an array, or scope to one `committee_id` instead.
 
 ### `GET /announcements`
 
@@ -655,6 +669,8 @@ Returns announcements visible to the caller: `audience` empty/null (everyone), `
 ### `POST /announcements`
 
 **Eboard only.** `{ "title": "...", "body": "...", "audience": ["active", "chair"], "committee_id": null }` — omit/empty `audience` (and no `committee_id`) to send to everyone.
+
+Valid `audience` values are `eboard`, `chair`, `active`, `pledge`, `alumni` and **`rush`**; anything else is a 400 rather than being stored, since a typo would match nobody and be invisible until somebody asked why they could not see it. **"Everyone" means every member, not everybody**: the untargeted branch requires a member group, so a rushee sees an announcement only when `rush` is named explicitly. This is the same rule the Rushee pill in the portal's audience picker exists to make obvious.
 
 ### `PUT /announcements/:id`
 
@@ -815,7 +831,21 @@ App Store safety requirement (reporting/blocking/moderation for an app with user
 
 ### `POST /reports`
 
-Any shared-album-group member. `{ "content_type": "user" | "message" | "group_message" | "photo", "content_id": "...", "reported_user_id": "uuid", "reason": "...", "explanation": "..." }`. `content_id` is required unless `content_type` is `"user"`. `reported_user_id` is trusted from the client (the UI reporting a message/photo/profile already knows who authored it) rather than re-derived server-side — content spans three different tables, not worth a per-type lookup just to double-check what the caller already knows.
+Any rush-accessible member. `{ "content_type": "user" | "message" | "group_message" | "photo", "content_id": "...", "reported_user_id": "uuid", "reason": "...", "explanation": "..." }`.
+
+`reported_user_id` is trusted from the client (the UI reporting a message/photo/profile already knows who authored it) rather than re-derived server-side — content spans three different tables, not worth a per-type lookup just to double-check what the caller already knows. It is trusted as to *whose* id it is, though, not as to its shape.
+
+| Field | Rule |
+|---|---|
+| `content_type` | One of the four; anything else is a 400 |
+| `content_id` | A **positive integer** within int4 range — every reportable table (`messages`, `group_chat_messages`, `photos`) is `SERIAL`. Required for all types except `"user"`, which must not send one |
+| `reported_user_id` | A canonical UUID. Required for `"user"` (it is the only thing naming the subject), optional otherwise. **404** if it names an account that no longer exists |
+| `reason` | Required, ≤100 characters |
+| `explanation` | Optional, ≤2000 characters |
+
+`reason` and `explanation` are **rejected rather than truncated** when too long: a report is evidence, and a silently shortened account of what happened is worse than being asked to shorten it yourself.
+
+`content_id` is validated because the column is loose `TEXT` shared across three tables, so the database will hold any string — see [Group chats](../website/messaging.md#the-report-escape-hatch) for what a non-numeric value there used to be able to do.
 
 ### `GET /reports`
 

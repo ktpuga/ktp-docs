@@ -51,6 +51,23 @@ A profile picture is also what gets a member onto the [public roster](./overview
 
 ---
 
+## The profile form
+
+One component, `components/profile/ProfileForm.jsx`, serves both onboarding at `/complete-profile` and Settings; eboard's "edit anyone" modal (`components/admin/AdminEditProfileModal.jsx`) is a deliberate non-reuse of it, but posts the same payload through `lib/profile.js`'s `buildProfilePayload`. On the API side both land in the **same normalizer**, so the rules cannot drift apart on the route with more authority. The per-field rules are documented once, at [API: `PUT /users/me/profile`](../api/endpoints.md#put-usersmeprofile).
+
+Two of them are worth knowing here because the form is what produces the value:
+
+- **Graduation is a semester and a year**, not a date. The form composes it from a `Spring`/`Fall` dropdown and a **free-text** four-character year box, so `"Spring abcd"` is something the real UI can submit; the API rejects it. Nothing is lost by that strictness, because `parseGraduationDate` already discards a value it cannot split back apart, leaving the picker blank and clearing the column on the next save. The client and the server agree.
+- **Date of birth is sent as `YYYY-MM-DD`**, which `<input type="date">` produces and `normalizeUserProfile` trims the stored timestamp down to. A value in any other spelling is a 400.
+
+:::warning `updateProfile` returns `{ error }` — the same rule as `updateUsername` above
+It used to go through `apiPut`, which **throws** on a non-ok response, and a thrown Server Action error has its message replaced in production by React's #441. That was survivable while the only 400s were the UGA-email rule (which the form pre-empts on the client) and a malformed LinkedIn URL.
+
+Once every field validates, it is not: a phone number with too few digits, a graduation that is not a semester and a year, a date of birth in the future and a name made of spaces are all failures the member has to read to fix. `lib/portal-api.js` now returns `{ error }` so they arrive as the API's own message.
+:::
+
+---
+
 ## Member Directory
 
 :::note LinkedIn buttons (2026-08-05)

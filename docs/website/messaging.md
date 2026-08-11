@@ -133,9 +133,11 @@ An **open** report naming a message in a member-created chat opens that chat to 
 - **It's reachable from the report, not by browsing.** A reported chat still doesn't appear in `GET /group-chats/all`. Otherwise a moderation grant quietly becomes general surveillance.
 
 :::warning Two details in the join hold the whole thing up
-`reports.content_id` is one loose `TEXT` column shared by DMs, group messages and photos, and **nothing validates its shape** — `reportsController` stores `req.body.content_id` exactly as posted.
+`reports.content_id` is one loose `TEXT` column shared by DMs, group messages and photos, so the **column itself** will hold any string at all.
 
-The join must therefore read `gcm.id::text = r.content_id`, never `r.content_id::integer`. A single report filed as `group_message` with a non-numeric `content_id` would make an integer cast throw `22P02` and take down `canRead` for **every** eboard read at once, not just that chat. That's a one-request denial of service available to anyone who can file a report.
+The join must therefore read `gcm.id::text = r.content_id`, never `r.content_id::integer`. A single report filed as `group_message` with a non-numeric `content_id` would make an integer cast throw `22P02` and take down `canRead` for **every** eboard read at once, not just that chat — a one-request denial of service available to anyone who can file a report.
+
+`reportsController` now validates `content_id` on the way in, so the API can no longer create such a row. **That is not a reason to relax the cast.** It still guards rows written before the validation existed, which nothing cleans up, and the read is what breaks, so the read is where it should be impossible.
 
 `content_type = 'group_message'` is a filter, not decoration. Ids restart per table, so without it a DM report whose id collided with a group message's would unlock an unrelated chat.
 :::

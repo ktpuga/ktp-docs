@@ -96,7 +96,7 @@ One-directional: `blocker_id` has blocked `blocked_id`. Composite PK, both colum
 |--------|-------|
 | `reporter_id`, `reported_user_id` | FK → `users` |
 | `content_type` | `user` \| `message` \| `group_message` \| `photo` |
-| `content_id` | Loose `TEXT` reference, not a real FK — spans three different tables depending on `content_type`, so one FK column can't cover all of them. Integrity enforced in the application layer. `NULL` when `content_type = "user"` |
+| `content_id` | Loose `TEXT` reference, not a real FK — spans three different tables depending on `content_type`, so one FK column can't cover all of them. Integrity enforced in the application layer. `NULL` when `content_type = "user"`. All three referenced tables are `SERIAL`, so `createReport` requires a **positive integer** here and stores it as digits; the column stays `TEXT` because the three id spaces overlap and only `content_type` disambiguates them |
 | `reason`, `explanation` | |
 | `status` | `open` \| `resolved` \| `dismissed` |
 | `moderator_response`, `resolved_by`, `resolved_at` | Set together whenever status moves away from `open` |
@@ -222,9 +222,94 @@ Same targeting shape as `events`/`announcements` (`audience TEXT[]` + `committee
 
 ## Input validation
 
-There is **no validation library** — no zod, joi or express-validator. Every rule is hand-written in the controller that owns the endpoint, and the great majority are *presence* and *permission* checks (`if (!title) return 400`), not *format* checks. Columns are almost all bare `TEXT` with no `CHECK` constraints, so Postgres accepts anything too.
+There is **no validation library** — no zod, joi or express-validator, and that is a decision rather than an omission. The API is plain CommonJS with no TypeScript, so zod's main benefit (inferred static types) buys nothing, and the rules that have actually caught bugs here are domain rules a schema library would not have expressed any better. Columns are almost all bare `TEXT` with no `CHECK` constraints, so Postgres accepts anything too.
 
-That is mostly fine, because React escapes anything rendered as a text node — a hostile string in someone's name or bio is inert.
+That is mostly fine for anything *rendered*, because React escapes a text node — a hostile string in someone's name or bio is inert. It is not fine for anything the database has to **parse**, which is where the shared primitives come in.
+
+`services/validate.js` holds the pieces with no domain rule of their own. Each returns `{ value }` or `{ error }` and **never throws**, so a controller turns `error` straight into a 400.
+
+| Helper | For |
+|---|---|
+| `intId` | A `SERIAL` primary key: digits only, 1 to int4's maximum |
+| `uuid` | An `authentik_id`, canonical 8-4-4-4-12, lowercased |
+| `boundedText` | Free text with a cap, rejecting or truncating per field |
+| `enumValue` | Membership in a fixed set, compared exactly |
+| `isoDate` | A timestamp, returned as a `Date` |
+| `dateOnly` | A `DATE` column, returned as a **`YYYY-MM-DD` string** |
+| `intIdArray`, `uuidArray` | Lists of the above, de-duplicated |
+
+:::danger Ids are validated because of Postgres, not tidiness
+A value that does not parse as its column's type does not become a bad row — it **aborts the statement**, and every controller here turns a thrown query into a `500`. Both codes were checked rather than assumed: `WHERE id = 'abc'` on an integer column is `22P02`, and `WHERE id = '2147483648'` is `22003`, so the range matters as much as the shape.
+
+The shape test matches the literal text (`/^\d+$/`) **before** converting, because parse-then-inspect disagrees with Postgres: `Number("1e3")` is `1000` and `Number.isInteger` agrees it is an integer, but Postgres is handed the string and rejects it.
+
+`intIdArray` and `uuidArray` **reject a bad entry rather than filtering it out.** They replaced a `.map(Number).filter(Number.isInteger)` idiom that silently dropped anything malformed, so a request naming five committees and one typo succeeded having applied four. That is the one failure mode a caller cannot detect for itself, because the response body describes what was saved rather than what was sent.
+
+All five controller call sites now reject: `committee_ids` on group chat create and audience update and on meeting create, `interviewer_committee_ids` on interview schedule create and update, and `option_ids` on a poll vote. `test/idArrays.test.js` pins each one, including that a rejected request leaves the row untouched.
+
+`visibility.js` was the sixth site. `parseAudience` is the **write-side** audience parser shared by album create, folder create and the three visibility-update routes, so one change covered five endpoints. It is the one where the old behaviour was actively unsafe rather than merely wrong: dropping an id from a **restriction** widens who can see the content, so restricting a folder to five committees and one typo returned `200` having restricted it to four. (The read side, `visibilityClause` and `canView`, was never involved.)
+
+The uuid lists — `member_ids`, `invitee_ids`, `user_id`, `:userId` — failed the other way. Nothing was dropped; the value went through untouched into a `UUID` column, so a malformed id was `22P02` and a **`500`**, an input error reported as a server fault.
+:::
+
+### A 400 names the field it is about
+
+The two profile routes (`PUT /users/me/profile` and `PUT /admin/users/:id/profile`, plus both username routes) return a **`field`** key alongside `message`:
+
+```json
+{ "message": "Phone number must have between 7 and 15 digits", "field": "phone" }
+```
+
+`normalizeProfileFields` always knew which rule failed and was discarding it, so the website could only show the message in a form-level banner. It now renders beside the input that caused it.
+
+:::note Optional forever, not a contract
+`field` is **absent** on anything that is not a single-field rejection — a 500, a fetch failure, a permission error. Both forms fall back to the banner when it is missing, because an error with nowhere to go must never be swallowed.
+
+The addition is safe for existing clients: iOS decodes errors as `struct ErrorResponse { let message: String? }` and Swift's `JSONDecoder` ignores unknown keys, so no iOS change was needed. That was checked in the source rather than assumed.
+
+The key is the **API's** field name, which is not always an input's name — `graduation_date` is one key but two inputs on the form. The website anchors its lookup on a `data-field` wrapper rather than an input `name`, so that case behaves like every other.
+:::
+
+### Text length caps
+
+Every text column here is bare `TEXT`, so nothing failed loudly when titles and bodies went unbounded — which is why it went unnoticed. `services/textLimits.js` is the single table, mirrored on the website by `lib/text-limits.js`.
+
+| Field | Cap |
+|---|---|
+| Titles, album names | 150 |
+| Committee, folder and group chat names | 100 |
+| Locations | 200 |
+| Descriptions | 2000 |
+| Announcement bodies | 5000 |
+| Poll questions | 300 |
+| Poll option labels / count | 150 / 20 |
+| Document link names | 200 |
+| Chat messages (DM and group) | 4000 |
+| Reactions | 32 |
+
+:::note These reject rather than truncate
+The opposite of `about_me`, deliberately. Truncating is right when losing one field's tail beats discarding a whole multi-field save. It is wrong when the author is composing a single thing and looking at it, because nobody re-reads what they just published to check whether the last paragraph survived.
+
+The reason to bound at all is mostly not security. An unbounded title is a wrecked layout on every card, list and push notification that renders the row, and it cannot be fixed from the UI that produced it. APNs caps the payload regardless, so the limit lands somewhere either way — better where the author is still on the page.
+
+The website's `maxLength` attributes come from the mirrored table. That is a convenience and never the enforcement: `maxLength` is a DOM attribute a client can decline to send, so the API checks all of these itself.
+:::
+
+:::note Messages have their own number, and two rules the cap had to fit around
+`MESSAGE` is 4000 rather than sharing `BODY` because the reasoning differs: this is the highest-volume write path, every message is re-sent through the sync envelope on each catch-up, and the first stretch of it becomes a push notification.
+
+Two existing rules constrain where the check goes. A message may have **no body at all** if it carries an attachment, so the length rule is `required: false` and the either-or check remains the one that speaks. And the body is validated **before** `storeAttachment` runs, so a rejected message cannot leave an orphaned upload behind.
+
+`REACTION` is 32 and is a **length** check, not an is-it-really-an-emoji check. `.length` counts UTF-16 code units and a ZWJ sequence like 👨‍👩‍👧‍👦 is already 11 of them before skin tone modifiers, so a tight cap would reject ordinary emoji. What had to stop was one member storing a novel per message, since reactions are aggregated into a JSON blob returned with **every** read of that conversation. Restricting the value to actual emoji is a separate decision about what a reaction is.
+:::
+
+:::warning `dateOnly` returns a string, and `isoDate` is the wrong tool for a `DATE` column
+`users.dob` is the only one in the schema. node-pg serialises a `Date` with the server's local offset, so a date-only value written that way lands a day early anywhere west of UTC. Measured from a UTC-4 machine against Postgres 16, same column and same statement: `"2004-05-14"` stores `2004-05-14`, and `new Date("2004-05-14")` stores `2004-05-13`.
+
+It is strict about spelling because the column is not: Postgres **accepts** `"20040514"`, `"5/14/2004"` (whose meaning depends on the server's `DateStyle`), `"2004-05-14T00:00:00Z"` and the year `99999`.
+
+And the round trip through UTC is not decoration — **JavaScript rolls `2004-02-30` forward to March 1** rather than refusing it, so checking only `Number.isNaN(date.getTime())` accepts a date Postgres calls out of range and stores a different day than the one submitted.
+:::
 
 :::danger URLs are the exception, and `new URL()` is not a safety check
 An `href` is a different trust context from a text node. `<a href={value}>` carrying `javascript:…` executes in the reader's session.
@@ -248,10 +333,13 @@ Values are **canonicalised on write**, so what's in the database is already safe
 **If you add any field that becomes an `href`, route it through `services/urls.js`.**
 :::
 
-Two other conventions worth knowing:
+Three other conventions worth knowing:
 
-- **`about_me` is truncated, not rejected** (600 chars) — losing the tail of a bio beats throwing away someone's whole profile save. `linkedin_url` is the opposite, rejected with a 400, because a mangled URL is a broken link rather than a shorter one.
+- **`about_me` is truncated, not rejected** (600 chars) — losing the tail of a bio beats throwing away someone's whole profile save. `linkedin_url` is the opposite, rejected with a 400, because a mangled URL is a broken link rather than a shorter one. `boundedText` takes a `truncate` flag so this stays a per-field choice and never becomes a global rule.
+- **Every other profile column rejects**, because each is something a person is found or addressed by, and half of one is the wrong answer rather than a shorter right one. Per-field rules: [`PUT /users/me/profile`](endpoints.md#put-usersmeprofile).
 - **Audience/visibility values are allowlisted**, not denylisted — `parseAudience` rejects unknown groups rather than storing them.
+
+Domain rules live beside the primitives rather than in them: `services/urls.js` (anything that becomes an `href`), `services/emails.js` (addresses and the UGA-domain rule), `services/usernames.js` (the one field that is also a login credential), and `services/profileFields.js`, which composes the lot into the **single normalizer shared by the member's own profile route and the eboard "edit anyone" route** — identical validation on two routes is exactly the kind of thing that drifts, and the hole would end up on the route with more authority.
 
 ---
 

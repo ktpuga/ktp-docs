@@ -335,6 +335,8 @@ Gated `SHARED_ALBUM_GROUPS` at the route, then by committee designation in the c
 
 :::note An empty `interviewer_committee_ids` is a real value
 `PATCH` treats an absent key as "leave alone" and an empty array as "close this round to everyone outside eboard". `COALESCE` can't tell those apart, so `updateSchedule` uses an explicit was-it-sent flag for this column.
+
+Because the empty array is a real setting, malformed input must never be able to reach it by accident. It used to: any non-array fell into the same branch, so sending `"3"` instead of `[3]` locked every committee out of the round and looked like a deliberate closure. Both that and a list containing a bad id are now a `400`.
 :::
 
 `eboard` + `chair` matches [rush announcements](./rush-portal.md): it covers the rush chair however they happen to be modelled — an eboard member with an `exec_title`, or a committee chair — without the route needing to know which.
