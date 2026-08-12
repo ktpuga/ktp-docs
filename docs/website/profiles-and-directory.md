@@ -39,7 +39,9 @@ Usernames are **display-only everywhere else** — every lookup, foreign key and
 
 Two fields added 2026-08-11.
 
-**"What you're doing now" appears on the public roster; links do not.** The original scope was member-side only for both, and the first half was reversed the same day: an alumnus saying what they're up to is the point of a public alumni page, and it shows there between their role and their LinkedIn icon. Links stay members-only, because a list of arbitrary member-supplied URLs rendered as live hrefs is a different kind of exposure from one line of text about yourself. Anyone who would rather not be on that page at all can turn themselves off it entirely, below.
+**Both "what you're doing now" and your links now appear on the public roster.** The original scope was member-side only for both, and both were reversed: an alumnus saying what they're up to, with a link to their portfolio, is the point of a public alumni page. Anyone who would rather not be on that page at all can turn themselves off it entirely, below.
+
+That makes the render-time URL check load-bearing rather than defensive. A list of arbitrary member-supplied URLs rendered as live hrefs on an **unauthenticated** page is the highest-exposure thing on the site, so the roster card runs every one through `safeExternalHref()` before rendering and drops anything that isn't plain `http(s)` — it does not trust that write-time validation covered rows written before that validator existed.
 
 **"What you're doing now"** is one line of free text for what an alumnus is up to after graduation: *"SWE at Google"*, *"Law school at Emory"*, *"Taking a year off"*. Free text rather than a company/title pair precisely so it can hold the second and third of those as comfortably as the first. It shows directly under the badges on a directory card, because for an alumnus it is usually the thing somebody opened the profile to find out.
 
@@ -57,7 +59,15 @@ A link with a label but no address, or an address with no label, is rejected wit
 
 ## Traits
 
-Eboard can type short **label/value pairs** onto any member: *Concentration: Fintech*, *Hometown: Atlanta, GA*, *Interned at: Delta*. They appear on the member's directory card **and** on the public roster, under their role and above their LinkedIn button.
+Eboard can type up to six short **captions** onto any member: *Pledge Chair*, *Fintech*, *Atlanta, GA*. Each is one plain string, up to 80 characters.
+
+They render as **pills beside the member's group badge**, on the directory card, in the profile modal, and on the public roster — deliberately the same treatment a chair's committee caption gets. A trait reading "Pledge Chair" should be indistinguishable from the caption a real chair gets, which is the point of them, so both come from one `CaptionPill` component rather than two lookalike styles that can drift.
+
+:::note They used to be label/value pairs
+Until migration `1788200000000` a trait was `{ label, value }` and rendered as a bordered definition list down the card. That shape made eboard invent a label for things that don't have one, and it read as a table rather than a caption. Existing rows were converted by joining the halves as `"label: value"`.
+
+Both cards coerce an un-migrated pair through `traitText()` rather than rendering it directly. React **throws** on an object child, so without that, deploying the site before running the migration would take the public roster down rather than merely look wrong.
+:::
 
 This generalises the exec title, which is the same idea fixed to one label. Exec titles stay exactly as they are; a trait is additive, a role is not.
 

@@ -192,7 +192,9 @@ Never touches Authentik — revoking real chapter/SSO access is a separate, eboa
 
 ### `PUT /admin/users/:authentikId/traits`
 
-**Eboard only.** Body `{ "traits": [{ "label": "Concentration", "value": "Fintech" }] }` → `{ traits }`. Up to **6**, label ≤40, value ≤80. Sending `[]` clears them; there is no separate delete.
+**Eboard only.** Body `{ "traits": ["Pledge Chair", "Fintech"] }` → `{ traits }`. Up to **6**, each ≤80 characters. Sending `[]` clears them; there is no separate delete.
+
+Each trait is one **plain string**, not a `{ label, value }` pair. They render as pills beside the member's group badge, the same treatment a chair's committee caption gets, and "Pledge Chair" is one string rather than a label and a value. Migration `1788200000000` changed the shape and converted existing rows by joining the halves as `"label: value"` — dropping either half would have destroyed chapter-authored text on a public page. A `{ label, value }` entry is now **rejected with a 400** rather than stringified, because storing it would print the literal text `[object Object]` on the public roster.
 
 Traits appear on the member's directory card and on the **public** roster, under their role. They generalise `exec_title`, which stays as it is.
 
