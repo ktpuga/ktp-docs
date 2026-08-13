@@ -51,7 +51,7 @@ Two things deliberately stay hardcoded and should not be converted: **member-gro
 
 The portals share a core feature set wired to the same backend, with permissions differing by group. One deliberate exception: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden).
 
-- **Dashboard** — upcoming events, recent announcements, recent photos, quick links
+- **Dashboard** — upcoming events, recent announcements, recent photos, quick links. The landing page of all four portals, `/admin` included since 2026-08-12
 - **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
 - **Committees** — browse committees and member counts; **request** to join a committee (eboard or that committee's chair approves) and leave any you are on; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
 
@@ -70,7 +70,9 @@ A pending request is stored separately from membership on purpose — putting it
 - **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))
 - **Settings** — edit your own profile (including profile picture, UGA and personal email, and an About Me), subscribe your calendar, review your blocked members (only shown if you have any), delete your account ([Safety & Moderation](#safety--moderation))
 
-`/admin` additionally gets **User Management** (`/admin/users` — real member data, plus eboard can change a member's group and set exec board titles from here), **Reports** (`/admin/reports` — the moderation queue, see below), **Homepage Photos** (the public chapter gallery), and **iOS Homepage Slideshow** (the in-app slideshow — a separate system from the website gallery). Announcement/event/poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`.
+`/admin` additionally gets **Analytics** (`/admin/analytics` — chapter metrics), **User Management** (`/admin/users` — real member data, plus eboard can change a member's group and set exec board titles from here), **Reports** (`/admin/reports` — the moderation queue, see below), **Homepage Photos** (the public chapter gallery), and **iOS Homepage Slideshow** (the in-app slideshow — a separate system from the website gallery). Announcement/event/poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`.
+
+Analytics was `/admin` itself until 2026-08-12 — eboard was the one group whose portal did not open on the Dashboard. It now does, on the same `PortalDashboard` the other three portals use, in whichever accent the red/blue toggle is set to. Analytics kept every feature and simply moved one route down.
 
 ---
 
