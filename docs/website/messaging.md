@@ -88,6 +88,23 @@ Membership is derived, so the member list in the UI keys on the audience as well
 
 ### Member-created chats
 
+:::danger Creation is TURNED OFF right now (since 2026-08-12)
+Members cannot currently create new group chats. **Existing member-created chats are untouched** and keep working normally — this only stops new ones.
+
+It is a hardcoded kill switch, not a database flag or an env var, and it lives in **two files that must be flipped together**:
+
+| Repo | File | Constant |
+|---|---|---|
+| ktp-api | `routes/groupChats.js` | `MEMBER_CHAT_CREATION_ENABLED = false` |
+| uga-ktp-website | `components/portal/MessagesPage.jsx` | `MEMBER_CHAT_CREATION_ENABLED = false` |
+
+Flipping only the website hides the button while `POST /group-chats/member` still answers, which is a hidden control rather than a closed feature. Flipping only the API leaves a visible button that 403s.
+
+**Eboard keeps its New Group Chat button**, because theirs creates *official* chapter chats through a different endpoint (`POST /group-chats`) that is not being turned off. The Chapter/Personal toggle inside the modal is hidden while the switch is off, so eboard cannot pick "Personal" and get a 403 from the closed route.
+
+Everything in the rest of this section describes the feature as it behaves when re-enabled.
+:::
+
 Any member **except a rushee** can make their own group chat: active, pledge, chair, alumni and eboard. In the Group Chats tab, **New Group Chat** opens the same modal everyone else uses, minus the group and committee pickers. Eboard sees one extra control, a **Chapter chat / Personal chat** choice, defaulting to Chapter so the button keeps meaning what it always meant.
 
 The rule members are shown, in the modal itself, is that the chat is private to the people they add and eboard can't read it unless someone reports a message in it. That is stated rather than assumed: nobody can guess either half of it.

@@ -49,6 +49,12 @@ Opening announcements/polls/events to rushees meant `audience IS NULL` — "All 
 
 It tests for *holding a member group* rather than *not being rush*, so someone accepted into a pledge class who still carries the `rush` group keeps full access.
 
+The poll create modal offers a **Rushees** pill, but `rush` is deliberately **not** in its `DEFAULT_AUDIENCE`. Reaching rushees therefore takes a deliberate tick, never a default — which is the UI half of the server rule above. (Contrast [albums and folders](./photos-and-documents.md), where the Rushee pill is *removed entirely*: rushees can never see photos or documents at all, so offering it there produced a dead Create button.)
+
+:::warning Declare `ROLES` at module scope, not in the component body
+Fixed 2026-08-12. `PollsPage`'s `ROLES` array was declared inside the component, below code that read it, which put it in a temporal dead zone — the create modal threw `Cannot access 'ROLES' before initialization` on render. It is static data with no dependency on props or state, so it belongs at module scope where hoisting order cannot bite.
+:::
+
 ## Rush announcements are a separate table
 
 `rush_announcements`, not an audience value on `announcements`.

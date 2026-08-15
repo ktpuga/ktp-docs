@@ -127,6 +127,14 @@ Two of them are worth knowing here because the form is what produces the value:
 - **Graduation is a semester and a year**, not a date. The form composes it from a `Spring`/`Fall` dropdown and a **free-text** four-character year box, so `"Spring abcd"` is something the real UI can submit; the API rejects it. Nothing is lost by that strictness, because `parseGraduationDate` already discards a value it cannot split back apart, leaving the picker blank and clearing the column on the next save. The client and the server agree.
 - **Date of birth is sent as `YYYY-MM-DD`**, which `<input type="date">` produces and `normalizeUserProfile` trims the stored timestamp down to. A value in any other spelling is a 400.
 
+:::danger Never pass a semester string to `new Date()` — the NaN guard will not catch it
+Fixed 2026-08-12. `formatGraduationDate` in `lib/portal-format.js` used to call `new Date(value)` on the stored value and fall back to the raw string only if the result was `NaN`. It never was: V8's lenient legacy date parser ignores the word it does not recognise and keeps the year, so **`new Date('Fall 2027')` is 1 January 2027**, not an Invalid Date.
+
+The guard therefore never fired, and every member's graduation rendered as "Jan &lt;year&gt;" — right year, wrong month, for the entire chapter at once, on both the profile card and the directory.
+
+It now matches an ISO prefix explicitly for legacy rows written before the column held a semester, and returns anything else as stored. The ISO branch rebuilds the date in **local** time from the captured month and year rather than passing the string to `new Date()`, which parses ISO as UTC midnight and lands on the previous month for anyone west of UTC — the same day-shift trap as `dateOnly` on the API side.
+:::
+
 :::warning `updateProfile` returns `{ error }` — the same rule as `updateUsername` above
 It used to go through `apiPut`, which **throws** on a non-ok response, and a thrown Server Action error has its message replaced in production by React's #441. That was survivable while the only 400s were the UGA-email rule (which the form pre-empts on the client) and a malformed LinkedIn URL.
 

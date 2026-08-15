@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Photos & Documents
 
-The **Files & Photos** portal tab has two parts: a member-facing photo/album system, and an eboard-managed document library. There's also a completely separate, fully public homepage gallery. See [API: Photos & Albums](../api/endpoints.md#photos--albums) for the backend routes behind all of this.
+The **Files & Photos** portal tab has two parts: a member-facing photo/album system, and a document library eboard and cabinet manage. There's also a completely separate, fully public homepage gallery. See [API: Photos & Albums](../api/endpoints.md#photos--albums) for the backend routes behind all of this.
 
 ---
 
@@ -37,11 +37,52 @@ Photos are stored in Immich, but never exposed directly to the browser — ktp-a
 
 A nested folder/file library for things like bylaws, meeting minutes, and course files — a completely different storage system from photos, since these are arbitrary file types (PDFs, Word docs, etc.), not something Immich handles well. Files live directly on ktp-api's own disk.
 
-- **Eboard only**: create folders (nested to any depth), upload files, add external links, delete files/folders/links.
+- **Eboard and cabinet** (the `chair` group): create folders (nested to any depth), upload files, add external links, and move or rename a file or folder.
+- **Eboard only**: delete files/folders/links, and set visibility. Deleting cascades a whole subtree and visibility is the access-control surface itself, so neither is handed to cabinet.
 - **Any shared-album-group member**: browse, download, preview.
+
+`RevampedPhotoFiles` therefore derives **two** flags, `isEboard` and `canManageDocs` (`isEboard || chair`), and passes both down. The toolbar is gated on `canManage`; the per-row delete and lock buttons stay on `isEboard`; `NewFolderModal` hides `VisibilityControl` for cabinet, so a folder a chair creates is unrestricted. **A single boolean cannot express these two tiers** — collapsing them back is how cabinet silently gains delete.
 - **In-portal preview**: clicking a document opens a modal without leaving the page — images render inline, PDFs render in an embedded viewer, and anything else (Word, Excel) shows a "download instead" message rather than a broken preview attempt. Implemented as a small hand-rolled modal, not a UI-library dialog — matches how `Tabs` is already hand-rolled in this codebase.
 - The document icon in the file list shows an actual thumbnail for images; everything else gets a generic file icon.
 - **External links**: a document doesn't have to be a real file — eboard can add a link (a Google Doc, Slides deck, Sheet, or any URL) that shows up in the same folder tree with a distinct external-link icon. Clicking one opens the URL directly in a new tab instead of going through the download/preview flow. Useful for anything that already lives outside the chapter's own storage (shared Google Docs, external forms, etc.) without needing to export/re-upload it.
+
+### Moving files and folders
+
+Every row carries a **Move** button (`canManage`, so cabinet gets it too) that opens `MoveToModal`, hitting `PATCH /documents/:id/folder` and `PATCH /documents/folders/:id/parent`. Before this existed, reorganising meant deleting and re-uploading.
+
+The picker **browses one level at a time instead of rendering a tree**, because `GET /documents/folders` is per-level and a tree would need an endpoint that does not exist. Two things fall out of that choice:
+
+- **The self-move guard is nearly free.** A folder's subtree is only reachable *through* that folder, so greying out the row of the folder being moved also shuts out every one of its descendants. The API's `isDescendant` check still runs — that reasoning holds for this UI only, and the endpoint is public to any cabinet member with a folder id.
+- **The restricted-ancestor warning is accurate.** The modal knows the restriction state of exactly the folders it walked through, which is exactly the chain that will sit above the item once it lands. One restricted ancestor anywhere in that chain triggers the warning.
+
+**Move Here is disabled when the destination is where the item already sits**, so a completed move always removes the row from the current view. The handler relies on that: it filters the row out of `folders` or `documents` rather than re-fetching.
+
+:::caution A move can shrink an audience with nothing else on screen saying so
+Effective audience is the intersection all the way down, so dropping an inheriting document into a restricted folder silently narrows who can see it, and dropping a restricted one in narrows it *again*. The picker is the only place that warns, and it uses two different sentences: an item with its own override is told only members who can see **both** ends will find it, while an inheriting one is told members outside the destination's audience **lose** access. Both are the ∩ rule above, phrased for the case at hand.
+:::
+
+### Drag-and-drop
+
+Native HTML5 drag (`draggable`/`onDragOver`/`onDrop`), not a library: `@dnd-kit` is only a transitive dependency via Sanity, and pulling it in direct means another `--legacy-peer-deps` install for something this small.
+
+**The dragged row is tracked in React state, not on the `dataTransfer`.** That is not a preference: `dragover` is forbidden from calling `getData()`, so a highlight that needs to know *what* is being dragged has nothing to read. The transfer still gets a `setData('text/plain', …)` because Firefox will not begin a drag without one, but that payload is never read back.
+
+**Breadcrumbs are drop targets too.** Without them drag could only ever move things *down*, since the table shows one level at a time. Dropping on a crumb never warns about audience, and that is deliberate rather than an omission: the breadcrumbs are the current folder's own ancestors, so a crumb drop moves the item to a **prefix** of the chain it already sits under. The new ancestor set is a subset of the old, so it can only widen the audience or leave it alone. Only the table's folder rows can narrow it, and those confirm first with the same sentence the picker shows.
+
+Two smaller things that are easy to regress:
+
+- **Images and anchors are draggable by default.** Every `<img>` and `<a>` in a row carries `draggable={false}`; without it, grabbing the thumbnail or the download link starts an image or URL drag and the row move never begins.
+- **`dragleave` fires when the pointer crosses onto a child**, so the highlight is only cleared when `e.currentTarget.contains(e.relatedTarget)` is false. Otherwise it flickers off over every button in the row.
+
+**Drag is polish, not the mechanism.** It does not work on touch and it is not keyboard-reachable, so the Move button stays visible on every row as the real path. Anything drag can do, the picker can do.
+
+### Renaming
+
+`PATCH /documents/:id` and `PATCH /documents/folders/:id`, both eboard + cabinet, driven by one `RenameModal` for both tables (a folder's label is `name`, a document's is `filename`).
+
+**The dialog preselects the basename, the way a file manager does.** Renaming `minutes-3-4.pdf` should not mean retyping `.pdf` or silently dropping it. `mime_type` still drives the in-portal preview either way, but a file downloaded without its extension is one the member's own OS cannot open. Folders and links have no extension to protect, so they select whole.
+
+Renaming an upload never touches `storage_path`. The stored file keeps its own name, and the dialog says so.
 
 ---
 
@@ -60,6 +101,12 @@ For an album or folder, no audience means everyone. For a **document**, both col
 ### Setting it
 
 Eboard picks an audience when creating an album or folder, and can change it afterwards from the lock button on any album card or document row (`PATCH /albums/:id/visibility`, `PATCH /documents/folders/:id/visibility`, `PATCH /documents/:id/visibility`). Before these existed, visibility could only be set at creation and changing an album's audience meant deleting and recreating it, losing the photos.
+
+:::caution An override on a document can only narrow, never widen
+A document's effective audience is **its folder's audience ∩ its own**: the folder gates navigation (documents are only ever listed by folder) while the document's override gates the row. So restricting a file to a group that is not already in its folder's audience leaves it visible to **eboard alone** — the intended group still cannot open the folder to reach it.
+
+This has been hit in practice and reads as "I restricted a file and it vanished completely". To let a group see one file, the file has to live somewhere that group can already reach. Related trap in the same control: **Custom with nothing ticked** sends two empty arrays, which stores as an override meaning *everyone* — inside a restricted folder that is the leak direction, not the lockout one.
+:::
 
 Restricted rows carry a **Restricted** badge that is always visible rather than hover-only — a restricted album is otherwise indistinguishable from an open one, and eboard needs to see at a glance what the chapter can't. On a document the badge reflects its *own* override only: an inheriting document inside a restricted folder is restricted in effect, but the folder is where that's shown and changed.
 

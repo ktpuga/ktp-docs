@@ -176,7 +176,7 @@ Judge this by which advisories are left, not how many.
 
 ## If you need to roll back
 
-`package.json` alone is not enough — the lockfile retains the resolved tree. Restore all three lockfiles together:
+`package.json` alone is not enough — the lockfile retains the resolved tree. This repo carries **three** lockfiles (`package-lock.json`, `yarn.lock`, `bun.lock`), and adding a dependency has to touch all of them or they drift: PR #42 added `auto-skeleton-react` to `package.json` and `package-lock.json` but not to `yarn.lock`, and nothing caught it because production reads none of them (see the warning below). Restore all three together:
 
 ```bash
 git checkout -- package.json package-lock.json yarn.lock bun.lock
@@ -184,4 +184,14 @@ rm -rf node_modules .next
 npm install --legacy-peer-deps
 ```
 
-Budget several minutes for the install. And note that **`npm audit fix` cannot run on this repo at all** — `lucide-react@0.344.0` declares a peer of React 16/17/18 against our React 19, so npm `ERESOLVE`s. Always use `npm install --legacy-peer-deps` locally. Production sidesteps this entirely because the Dockerfile uses `bun install`, which ignores peer conflicts.
+Budget several minutes for the install. And note that **`npm audit fix` cannot run on this repo at all** — `lucide-react@0.344.0` declares a peer of React 16/17/18 against our React 19, so npm `ERESOLVE`s. Always use `npm install --legacy-peer-deps` locally.
+
+:::warning Production does not use any of the three lockfiles
+This page previously said the Dockerfile uses `bun install`. It does not, and hasn't for some time — `Dockerfile` line 8 is `npm install --legacy-peer-deps`, the same command you run locally. It hits the same peer conflict and resolves it the same way.
+
+More importantly, the deps stage is `COPY package.json ./` **only**. No lockfile is copied into the image, so a production build resolves the whole tree fresh from the semver ranges in `package.json` every time. Consequences worth holding on to:
+
+- **Production builds are not reproducible.** Two builds of the same commit, weeks apart, can ship different transitive versions. A dependency that publishes a broken patch release breaks the next deploy with no commit to blame.
+- **A lockfile that is missing an entry will not fail the deploy.** That is why the gap described below stayed invisible.
+- Pinning a version means pinning it in `package.json` itself. Editing a lockfile has no effect on production whatsoever.
+:::

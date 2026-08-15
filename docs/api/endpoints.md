@@ -586,6 +586,12 @@ Visible polls for the caller (or all, if eboard), each with its options, aggrega
 
 `audience` accepts the same values as an announcement, `rush` included, and rejects anything else with a 400. Rushees vote only in polls that name `rush` explicitly.
 
+:::note `audience` and `committee_id` ADD, they don't narrow
+Send both and both are kept. `findAllForUser` ORs the audience match against the committee match, so a poll aimed at `["pledge"]` plus the Marketing committee reaches **every pledge and everyone on Marketing** — not just the pledges who are also on Marketing.
+
+Until 2026-08-12 `createPoll` nulled `audience` whenever `committee_id` was set, silently discarding half of what the form submitted and making "roles or committees, pick one" a rule of the API rather than a choice in the UI. Announcements and events had always targeted both together; polls were the outlier.
+:::
+
 ### `DELETE /polls/:id`
 
 **Eboard only.**
@@ -708,7 +714,15 @@ Ordered by `display_order`, then `event_date` newest-first, then `id`. `event_da
 
 ## Documents
 
-An eboard-managed file library (bylaws, meeting minutes, course files) shown in the Files & Photos portal tab. Not Immich — arbitrary file types stored on ktp-api's own disk. View: any shared-album-group member. Writes: eboard only.
+A file library (bylaws, meeting minutes, course files) shown in the Files & Photos portal tab. Not Immich — arbitrary file types stored on ktp-api's own disk. View: any shared-album-group member.
+
+**Writes have two tiers.** Eboard **and cabinet** (the `chair` group) may *add* (folder, upload, link) and *move*; **only eboard** may *delete* or *set visibility*. Deleting cascades whole subtrees, and visibility is the access-control surface itself, so both stay with eboard.
+
+Cabinet is not covered by `seesEverything`, so every add and move handler checks that the destination folder is one the caller can actually **see** (`documentFolderModel.findVisibleById`, `findViewableDocument`), not merely that it exists. A destination the caller may not see returns **404, not 403** — a 403 would confirm a restricted folder exists, which is the same reasoning as the download guard.
+
+:::caution A document override cannot widen access
+The effective audience of a document is **its folder's audience ∩ its own**. The folder gates navigation (documents are only ever listed by folder) while the document's override gates the row, so restricting a file to a group that is not already in its folder's audience leaves it visible to eboard alone. An override narrows, never widens.
+:::
 
 ### `GET /documents/folders?parent_id=<id>`
 
@@ -716,7 +730,17 @@ Lists subfolders of `parent_id` (omit for the top level).
 
 ### `POST /documents/folders`
 
-**Eboard only.** `{ "name": "...", "parent_id": null }` — folders nest to any depth.
+**Eboard + cabinet.** `{ "name": "...", "parent_id": null }` — folders nest to any depth. A non-eboard caller that sends a non-empty `audience`/`committee_ids` gets a **403** rather than having it quietly dropped: silently ignoring it would tell a chair their folder is restricted when every member can see it.
+
+### `PATCH /documents/folders/:id/visibility`
+
+**Eboard only.** `{ "audience": [...], "committee_ids": [...] }`.
+
+### `PATCH /documents/folders/:id/parent`
+
+**Eboard + cabinet.** `{ "parent_id": 3 }`, or `null` to move the folder back to the top level. Visibility is untouched — a folder keeps its own audience wherever it sits.
+
+**Cycle-guarded.** Moving a folder into itself or into any of its own descendants is a **400**. Without that guard the subtree is detached from the root permanently: the UI only ever walks *down* from the root, so there is no path back to it. The check is a recursive CTE (`documentFolderModel.isDescendant`) whose seed row is the folder itself, which is what makes the self-move case fall out of the same query.
 
 ### `DELETE /documents/folders/:id`
 
@@ -728,7 +752,9 @@ Lists documents in `folder_id` (omit for the top level).
 
 ### `POST /documents`
 
-**Eboard only.** Multipart upload, field `file` (any file type, 50MB limit), form field `folder_id` (omit for the top level).
+**Eboard + cabinet.** Multipart upload, field `file` (any file type, 50MB limit), form field `folder_id` (omit for the top level).
+
+`folder_id` is validated as an integer id and checked for visibility before the insert. Multer has already written the file to disk by the time the handler runs, so every rejection path unlinks it (`discardUpload`) instead of leaving an orphan behind — disk on this server is limited.
 
 ### `GET /documents/:id/download`
 
@@ -740,7 +766,31 @@ Same file, but `Content-Disposition: inline` — used for the in-portal preview 
 
 ### `POST /documents/link`
 
-**Eboard only.** An external hyperlink (Google Docs/Slides/Sheets, or any URL) shown alongside real files in the same folder tree — no file on disk. `{ "folder_id": null, "filename": "Meeting Notes", "url": "https://docs.google.com/..." }`. Every document row now carries `kind: "file" | "link"` — link rows have `url` set and no `mime_type`/`file_size`/`storage_path`.
+**Eboard + cabinet.** An external hyperlink (Google Docs/Slides/Sheets, or any URL) shown alongside real files in the same folder tree — no file on disk. `{ "folder_id": null, "filename": "Meeting Notes", "url": "https://docs.google.com/..." }`. Every document row now carries `kind: "file" | "link"` — link rows have `url` set and no `mime_type`/`file_size`/`storage_path`.
+
+### `PATCH /documents/:id/visibility`
+
+**Eboard only.** `{ "audience": [...], "committee_ids": [...] }`. An **empty body means inherit the folder** — a document is the one place where NULL does not mean "everyone". Sending empty arrays instead is an explicit override meaning *everyone*, which inside a restricted folder is a leak.
+
+### `PATCH /documents/:id/folder`
+
+**Eboard + cabinet.** `{ "folder_id": 3 }`, or `null` to move the document out to the top level. The audience columns are deliberately left alone: an inheriting document re-points its inheritance at the new folder, and one with an explicit override keeps that override.
+
+Note the consequence — moving an inheriting document into a more restricted folder silently shrinks who can see it.
+
+### `PATCH /documents/:id`
+
+**Eboard + cabinet.** `{ "filename": "March Minutes.pdf" }`. Renaming is grouped with moving rather than with delete and visibility, on the same reasoning: it destroys nothing and it changes nobody's access.
+
+This renames the **display name only**, for uploads and links alike (`filename` is the label for both). `storage_path` is deliberately untouched, so the file on disk keeps the name it was stored under and every existing download keeps working.
+
+:::note Renaming an upload can strip a useful extension
+`mime_type` is what drives the in-portal preview, so preview survives a rename to `"March Minutes"` with no `.pdf`. The **download** does not: the member's own OS has nothing to open it by. The portal's rename dialog preselects only the basename so the extension is left in place by default, but the endpoint itself does not enforce one.
+:::
+
+### `PATCH /documents/folders/:id`
+
+**Eboard + cabinet.** `{ "name": "Fall 2026 Resources" }`. Rename only; audience and parent are untouched. Like every cabinet-writable route here it checks the folder is one the caller can **see** and answers `404` rather than `403` when it is not.
 
 ### `DELETE /documents/:id`
 
@@ -827,6 +877,8 @@ Chats the caller is a member of, with last message + unread count.
 **Eboard only.** Creates an **official** chat. `{ "name": "...", "member_ids": ["uuid", "uuid"], "audience": [...], "committee_ids": [...] }` — the creator is automatically added too, so eboard isn't locked out of a chat they just made.
 
 ### `POST /group-chats/member`
+
+**Currently returns `403` for everyone** — creation is switched off at the route by `MEMBER_CHAT_CREATION_ENABLED = false` in `routes/groupChats.js`, ahead of the controller. Existing member-created chats are unaffected. See [Messaging](../website/messaging.md#member-created-chats) for the matching website flag that has to be flipped with it. The rest of this entry describes the behaviour when it is on.
 
 **Any member except `rush`.** Creates a **member-created** chat (`is_member_created = TRUE`), invisible to eboard oversight and administered by its creator alone.
 

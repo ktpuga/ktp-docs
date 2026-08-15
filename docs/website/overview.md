@@ -141,12 +141,29 @@ Available across the app via `PortalThemeProvider`/`ThemeToggle` — most portal
 
 ---
 
+## Loading skeletons
+
+Added 2026-08-12 (PR #42). The dashboard shows shaped placeholders while its four API calls are in flight instead of the "Loading..." text it used to.
+
+There are **two mechanisms**, and they are not interchangeable:
+
+- **`auto-skeleton-react`** — a dependency, used in exactly one file, `components/portal/PortalDashboard.jsx`. Wrap a block in `<AutoSkeleton loading={loading}>` and it derives the placeholder from the real markup, so the skeleton cannot drift from the layout it stands in for. Mark a child `data-no-skeleton` to leave it out (used for the hover-only accent bar on the stat cards, which has nothing to stand in for).
+- **Hand-rolled `animate-pulse` spans** — used for the sidebar's user block in `PortalShell.jsx` and for the name in the dashboard hero, where the placeholder is a single line of text and pulling in the wrapper would be more machinery than the job needs.
+
+:::note PR #42's `PortalShell.jsx` diff looks enormous and is almost entirely reformatting
+586 changed lines, of which the only behavioural change is two `animate-pulse` spans. The rest is one long `RevampedNavItem` signature reflowed across multiple lines. Don't go looking for a rewrite that isn't there.
+:::
+
+---
+
 ## Local development
 
 ```bash
-npm install
+npm install --legacy-peer-deps
 npm run dev
 ```
+
+`--legacy-peer-deps` is required, not optional. A bare `npm install` fails outright with `ERESOLVE` — `lucide-react@0.344.0` declares a peer of React 16/17/18 and this app is on React 19. See [Next.js 16 migration](./nextjs-16-migration.md#if-you-need-to-roll-back) for the full story, including why production is unaffected.
 
 Key environment variables (see `.env.example` for the full, annotated list):
 
