@@ -49,6 +49,20 @@ The counts re-implement each tab's visibility rules, so they have to agree with 
 
 Messages keeps its own unread count from real per-message read receipts. That is a genuinely per-item question ("which messages have I read"), it already worked, and folding it into a per-tab cursor would have made it worse.
 
+### Meetings counts unanswered invitations, not new meetings
+
+**This one is not a cursor at all**, despite living under the same `unreadCounts` key. `countMeetings` counts scheduled, not-yet-started meetings where the member's `meeting_invitees.response` is still `'pending'`.
+
+It used to be `m.created_at > cursor` — "meetings created since you last opened the tab" — which meant a member could be invited, glance at Meetings, clear the badge, never reply, and never be reminded again. An invitation is the clearest case there is of somebody waiting on you, and it was the one badge that forgot.
+
+No schema change was needed: `response` already defaulted to `'pending'` and nothing was reading it. The client skips its optimistic clear-on-view for this tab (`CLEARS_ON_ACTION_NOT_VIEW` in `lib/use-tab-notifications.js`), so "you still owe 3 replies" stays true while you are looking at the list. `markTabSeen` still writes the cursor row; it is simply ignored by the count.
+
+Meetings that have already started are excluded, for the same reason cancelled ones are: replying is not an action anyone can still take, and a badge you cannot clear is worse than no badge.
+
+:::note Pending meetings deliberately do NOT appear on the calendar
+`meetingModel.findForCalendar` returns only meetings you have accepted (or organise). Your calendar is your schedule, not your inbox — showing unanswered invitations there would clutter it with things you may decline, and the ICS feed would export meetings you never agreed to. So unlike event RSVP, meeting replies happen in the Meetings tab, and the badge is what points you at it.
+:::
+
 ### Calendar is different too: unanswered RSVPs outrank "new"
 
 A pending RSVP badge must **survive being looked at**. The cursor above cannot express that — `markTabSeen` fires on visit, so an RSVP routed through it would clear for everyone who opened the calendar and decided to answer later, which is precisely the person the badge exists for.
