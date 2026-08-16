@@ -311,6 +311,16 @@ Reads (`GET /events`, `GET /events/:id`) use `optionalAuth` — a valid token pe
 
 Returns events visible to the caller: public ones (no `audience`/`committee_id` set) always; plus, if authenticated, ones where `audience` overlaps the caller's Authentik groups, or the caller is a member of the event's `committee_id`. Eboard gets every event unfiltered. Chair and eboard members count as `active` for this overlap even though Authentik keeps the three groups mutually exclusive — targeting `audience: ["active"]` still reaches them (Announcements and Polls, targeted the same way as Events, inherit this too).
 
+### `GET /events/:id`
+
+A single event, filtered by **the same audience predicate as the list** — `VISIBLE_TO_VIEWER_SQL`, one shared constant in `eventModel` rather than two similar queries. Eboard is unfiltered, matching `GET /events`.
+
+An event the caller may not see returns **404, not 403**: restricted content is hidden entirely here, the same way restricted albums, folders and documents are. A 403 would confirm the event exists.
+
+:::note This was a real hole, fixed 2026-08-16
+This route previously called `findById` and returned the row with no audience check at all, so any caller holding an id could read any event, eboard-only ones included — and ids are sequential. It had no consumers (iOS fetches only the list; the website uses `PUT`/`DELETE` and the attendance subroutes), so closing it broke nothing. The predicate is shared with the list specifically so a future edit cannot leave a weaker copy behind.
+:::
+
 ### `POST /events`
 
 **Request body:**
@@ -323,7 +333,8 @@ Returns events visible to the caller: public ones (no `audience`/`committee_id` 
   "location": "Boyd GSRC",
   "audience": ["active", "chair"],
   "committeeIds": [],
-  "requiresAttendance": false
+  "requiresAttendance": false,
+  "requiresRsvp": false
 }
 ```
 
@@ -346,7 +357,123 @@ Same permission logic as `POST /events`.
 
 ### `DELETE /events/:id`
 
-Eboard can delete any event; a non-eboard creator can delete their own.
+Eboard can delete any event; a non-eboard creator can delete their own. Deleting cascades the event's RSVP rows.
+
+---
+
+## RSVP
+
+"Are you coming?", asked *before* the event, for events that opted in via `requiresRsvp`. **Independent of attendance in both directions** — an event can ask for one, both or neither.
+
+:::danger RSVP and attendance must never share storage
+`event_rsvps` is a separate table from `event_attendance` on purpose. Attendance records who actually turned up: it is materialised by `syncRoster`, written by QR check-in, and frozen by `attendanceFinalizedAt` because it becomes chapter history. An RSVP is a changeable statement of intent. Folded together, a "going" RSVP would be indistinguishable from a check-in, which is precisely the number nobody may get wrong.
+:::
+
+### Every event gains two fields
+
+`GET /events` and `GET /events/:id` now return:
+
+```json
+{
+  "requiresRsvp": true,
+  "myRsvp": "going"
+}
+```
+
+`myRsvp` is `"going"`, `"not_going"`, or `null` when the caller has not answered (or is anonymous). It is always about the **caller only** — a member never learns anyone else's answer from these routes.
+
+A third field, `canRsvp`, says whether the API will actually **accept** an RSVP from this caller:
+
+```json
+{ "requiresRsvp": true, "myRsvp": null, "canRsvp": false }
+```
+
+:::danger Do not draw the RSVP control from `requiresRsvp` alone
+Seeing an event and being *sent* one are different questions with different answers. The calendar read tests the caller's Authentik token groups; RSVP eligibility tests `users.member_group` against the event's audience — and **there is no creator clause in it.** An eboard member who targets an event at `["pledge"]` can see that event (eboard sees everything) and is **not** a recipient of it.
+
+The portal originally gated its buttons on `requiresRsvp` alone, so organisers were shown a control that answered `403`. `canRsvp` exists so the client never has to infer this. Gate the buttons, the "RSVP needed" badge, and any pending-RSVP count on it.
+:::
+
+Creating an event does not put you in its audience — that is deliberate, not an oversight. An organiser inside the audience (an untargeted all-chapter event, say) gets `canRsvp: true` and may answer normally; there is no special case for creators in either direction.
+
+Both `canRsvp` and the `PUT` guard evaluate the **same** SQL predicate (`RECIPIENT_PREDICATE_SQL` in `eventModel`), so the flag cannot promise something the write then refuses. The list route resolves it for every event in **one** batched query rather than one per row.
+
+`GET /events/:id` additionally returns `rsvpSummary`, **for eboard or the event's creator only**. It is absent (not zeroed) for everyone else:
+
+```json
+{
+  "rsvpSummary": { "going": 12, "notGoing": 3, "pending": 7, "total": 22 }
+}
+```
+
+`rsvpSummary` is deliberately **not** on `GET /events`. Each summary needs a `users` scan to compute `total`, and that list can be the whole calendar, so putting it there would mean one scan per event on every calendar load.
+
+### Where members actually answer
+
+Answering lives in the **Upcoming events** list beside the calendar, not only on the event card inside the day panel. The panel version sits one click behind a date nobody clicks unless they already know something is there, so RSVPs went unanswered simply because nothing asked. An unanswered row is outlined in amber and carries an "RSVP needed" badge; answered rows return to the normal border, so the list keeps reading as a to-do.
+
+The list row is itself a `<button>` that opens the day, so the RSVP buttons sit in a **sibling footer**, not inside it — a button nested in a button is invalid HTML and browsers recover by dropping the inner one.
+
+See [Tab badges](../website/notifications.md#calendar-is-different-too-unanswered-rsvps-outrank-new) for why the sidebar count persists until answered rather than clearing on visit.
+
+### `PUT /events/:id/rsvp`
+
+Any authenticated member, answering for themselves. There is no route for answering on anyone else's behalf, which is why this needs no shared secret the way QR attendance does.
+
+```json
+{ "status": "going" }
+```
+
+`status` must be `"going"` or `"not_going"`. Responses:
+
+| Status | When |
+|---|---|
+| `200` | `{ eventId, status, createdAt, updatedAt }` — upserted, so changing your mind updates the one row |
+| `400` | Bad `status`, bad id, or the event is not asking for RSVPs |
+| `403` | `{ "message": "This event was not sent to you" }` — caller is outside the event's recipient set |
+| `404` | No such event |
+| `409` | `{ "message": "This event has already ended" }` |
+
+The cut-off is **`endDate`, not `startDate`**: someone stuck in traffic changing "going" to "can't make it" during the event is exactly the update the organiser most wants. 409 rather than 400 because the request is well formed and the client should *hide the control*, not report a validation error.
+
+### `GET /events/:id/rsvps`
+
+**Eboard or the event's creator only.** Note this is a *narrower* set than attendance, which also allows any chair — response rows name individuals.
+
+```json
+{
+  "eventId": "42",
+  "requiresRsvp": true,
+  "summary": { "going": 2, "notGoing": 1, "pending": 5, "total": 8 },
+  "responses": [
+    {
+      "userId": "uuid",
+      "displayName": "Sam Rivera",
+      "username": "srivera",
+      "memberGroup": "active",
+      "profilePictureAssetId": "immich-uuid-or-null",
+      "status": "going",
+      "respondedAt": "2026-08-16T14:02:11.000Z"
+    }
+  ]
+}
+```
+
+`responses` contains only people who have actually answered; `pending` is the difference between `total` and those answers, since people who have not responded have no row to return.
+
+:::caution `findRecipientIds` is the audience authority for RSVP, not `findAllForUser`
+`eventModel` has two audience implementations and they deliberately disagree. `findAllForUser` (the calendar query) tests the caller's **Authentik token groups**, so a rushee promoted to pledge keeps their old access. `findRecipientIds` tests the scalar **`users.member_group`** column, excludes soft-deleted accounts, and expands `audience: ["active"]` to include `chair` and `eboard`.
+
+RSVP uses `findRecipientIds` for the write guard **and** for `total`, because it is the set that was actually told about the event — the same set push notifications and email go to. Mixing the two would let a chair be counted in `total` while being refused the RSVP, so `pending` could never reach zero on any event targeted at `active`.
+:::
+
+:::caution Editing an event's audience silently rewrites its RSVP counts
+Nothing is snapshotted. Eligibility is re-derived on every read and intersected with the stored answers, so narrowing an audience **immediately** stops counting the people it excluded, in both `summary` and `responses`, with no write and no cleanup job.
+
+The rows survive rather than being deleted, so re-widening the audience restores the earlier answers instead of discarding work members already did. Do not add a cached recipient list or an `rsvp_eligible` column — it would go stale the moment the event was edited, and the creator would be reading a total that no longer described anybody.
+:::
+
+Turning `requiresRsvp` back off does **not** delete the answers, matching how disabling attendance leaves its roster alone.
 
 ---
 

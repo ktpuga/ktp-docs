@@ -49,6 +49,22 @@ The counts re-implement each tab's visibility rules, so they have to agree with 
 
 Messages keeps its own unread count from real per-message read receipts. That is a genuinely per-item question ("which messages have I read"), it already worked, and folding it into a per-tab cursor would have made it worse.
 
+### Calendar is different too: unanswered RSVPs outrank "new"
+
+A pending RSVP badge must **survive being looked at**. The cursor above cannot express that — `markTabSeen` fires on visit, so an RSVP routed through it would clear for everyone who opened the calendar and decided to answer later, which is precisely the person the badge exists for.
+
+So the calendar nav item has a third source, `usePendingRsvpCount` in `lib/use-pending-rsvps.js`: the number of upcoming events where `requiresRsvp` is true and `myRsvp` is null. **It clears only when the member actually answers.**
+
+:::note They are not summed
+`badgeFor` returns the pending-RSVP count **when there is one**, and falls back to the normal new-content count otherwise. Adding them would count a brand-new RSVP event twice — once as new content, once as an unanswered RSVP — and the badge would then drop from 2 to 1 on a mere visit, which reads as the count losing track rather than as progress.
+:::
+
+There is no counting endpoint. `GET /events` already returns `requiresRsvp` and `myRsvp` per event, so the count is derived client-side from data the calendar fetches anyway — deliberately avoiding an `rsvpSummary` on the list route, which would cost a `users` scan per event.
+
+Past events are excluded, using **`endDate`** to match the API's own cut-off. An event that has ended answers `409` to any RSVP, so badging one would be a number the member has no way to clear.
+
+Polling is 60s, slower than messages (10s) and tab notifications (30s), because an unanswered RSVP is a standing to-do rather than news. Answering dispatches `RSVP_CHANGED_EVENT` so the badge updates immediately: the sidebar is a layout in a different React tree from the calendar page, so there is no shared state to update — the same reason `PROFILE_PICTURE_CHANGED_EVENT` exists.
+
 ## Reminders
 
 Events and meetings generate reminders automatically. Nobody schedules them by hand.
