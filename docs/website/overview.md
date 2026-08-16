@@ -52,7 +52,7 @@ Two things deliberately stay hardcoded and should not be converted: **member-gro
 The portals share a core feature set wired to the same backend, with permissions differing by group. One deliberate exception: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden).
 
 - **Dashboard** — upcoming events, recent announcements, recent photos, quick links. The landing page of all four portals, `/admin` included since 2026-08-12
-- **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them
+- **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them. An event can ask for an **RSVP**, answered from the Upcoming events list beside the calendar; the sidebar badges until you answer ([RSVP](../api/endpoints.md#rsvp))
 - **Committees** — browse committees and member counts; **request** to join a committee (eboard or that committee's chair approves) and leave any you are on; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
 
 :::warning Joining a committee is not cosmetic, which is why it needs approval

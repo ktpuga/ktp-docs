@@ -22,10 +22,18 @@ A committee chair can create either, and for a while a single **Schedule Meeting
 |---|---|---|
 | Creates | a row in `meetings` | a row in `events` |
 | Who sees it | only the people invited | everyone on the committee |
-| RSVP | yes — `going` / `not_going` | none |
+| RSVP | yes — `going` / `not_going`, in `meeting_invitees` | yes, **opt-in** per event, in `event_rsvps` |
 | Reaches a personal calendar | only for whoever accepts | for the whole committee |
 | Attendance / QR check-in | no | yes, opt-in (defaults on) |
 | Visible to eboard's unfiltered calendar | no | yes |
+
+:::danger Two different features are called "RSVP". They share no code.
+Meeting RSVP is **`meeting_invitees.status`** — the invitee list *is* the meeting's audience, so being invited and being able to answer are the same fact, and a meeting with no acceptances is a meeting nobody is coming to.
+
+Event RSVP is **`event_rsvps`**, added later and **opt-in per event via `requires_rsvp`**. An event's audience is a targeting rule, not a list of people, so who may answer has to be derived (`RECIPIENT_PREDICATE_SQL`) and is surfaced to clients as `canRsvp`. Notably **the creator is not automatically a recipient**, which has no equivalent in meetings.
+
+They are separate tables, separate routes (`POST /meetings/:id/respond` vs `PUT /events/:id/rsvp`), and separate UI. Do not "unify" them without reading both — the audience models genuinely differ, and that difference is the reason meetings exist as their own table at all.
+:::
 
 Rule of thumb: **a meeting asks, an event announces.** Use a meeting when you need to know who's coming and it's nobody else's business; use an event when it belongs on the calendar and you may want to scan people in.
 
