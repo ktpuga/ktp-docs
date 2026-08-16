@@ -122,7 +122,16 @@ All of it lives in `lib/avatar.js` on the website. Two consequences worth knowin
 
 One component, `components/profile/ProfileForm.jsx`, serves both onboarding at `/complete-profile` and Settings; eboard's "edit anyone" modal (`components/admin/AdminEditProfileModal.jsx`) is a deliberate non-reuse of it, but posts the same payload through `lib/profile.js`'s `buildProfilePayload`. On the API side both land in the **same normalizer**, so the rules cannot drift apart on the route with more authority. The per-field rules are documented once, at [API: `PUT /users/me/profile`](../api/endpoints.md#put-usersmeprofile).
 
-Two of them are worth knowing here because the form is what produces the value:
+Three of them are worth knowing here because the form is what produces the value:
+
+- **The onboarding form does not ask for the UGA email; the Settings form does.** The Authentik enrollment prompt collects the address now and `POST /users/sync` seeds it onto the row at first login, so it is already on file before anyone reaches `/complete-profile`. The field stays on the Settings form so it remains correctable.
+
+  The mechanism is worth reading before touching either form. `buildProfilePayload` uses `formData.has('email')` for this one key, so a form that does not render the input omits the key entirely rather than sending `null` — and the API treats those two differently: an **absent** key defers to the address already stored, while an **explicit null** is someone clearing the field and is still refused. Re-rendering the input on the builder without following that chain will 400 every first save.
+
+  :::warning Deploy order
+  Configure the Authentik prompt **before** shipping a website that omits the field. In between, a new non-alumni member has nothing seeding the column and no input to type into, so their first save is a 400 they cannot clear. The API keeps that 400 deliberately — the alternative is a `profile_complete` account with no UGA address, which is the one identity fact the chapter relies on.
+  :::
+
 
 - **Graduation is a semester and a year**, not a date. The form composes it from a `Spring`/`Fall` dropdown and a **free-text** four-character year box, so `"Spring abcd"` is something the real UI can submit; the API rejects it. Nothing is lost by that strictness, because `parseGraduationDate` already discards a value it cannot split back apart, leaving the picker blank and clearing the column on the next save. The client and the server agree.
 - **Date of birth is sent as `YYYY-MM-DD`**, which `<input type="date">` produces and `normalizeUserProfile` trims the stored timestamp down to. A value in any other spelling is a 400.

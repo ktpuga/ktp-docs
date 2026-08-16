@@ -12,7 +12,7 @@ New members are onboarded through Authentik's invitation system. Admins create a
 
 1. **Admin creates an invitation** in Authentik with the target group
 2. **User clicks the invite link** → goes through the `ktp-enrollment` flow
-3. **User sets username + password** (no email change — Authentik manages email separately)
+3. **User sets their UGA email, username and password** (confirmed with a repeat field)
 4. **Group is assigned** automatically via expression policy
 5. **User logs in** → website syncs their profile to the database → redirected to complete-profile if needed
 
@@ -42,11 +42,11 @@ The custom attribute value is loaded into the enrollment flow's `prompt_data` co
 | Order | Stage | Type | Notes |
 |-------|-------|------|-------|
 | 10 | enrollment-invite | Invitation Stage | Validates the invitation token |
-| 20 | enrollment-prompt | Prompt Stage | Prompts for username + password — **no validation policies attached** |
+| 20 | enrollment-prompt | Prompt Stage | Prompts for UGA email + username + password + password repeat |
 | 30 | enrollment-user-write | User Write Stage | Writes the new user to Authentik |
 | 100 | enrollment-user-login | User Login Stage | Logs the user in + runs group assignment policy |
 
-> **Important:** The `enrollment-prompt` stage currently has **no validation policies** attached. Authentik's *default* validation policies crashed enrollment and were removed. See [Password requirements](#password-requirements) below — this is fixable, but not by re-attaching what was removed.
+> **Important:** Attach password and email rules as **Validation Policies on the Prompt Stage**, never as a policy binding on the flow's stage binding. Authentik's *default* validation policies crashed enrollment once and were removed; the reason, and why re-attaching them is not the fix, is under [Password requirements](#password-requirements).
 
 ### Password requirements
 
@@ -110,6 +110,93 @@ Passing (1) but failing (2) is the signature of a wrong `Password field`: the po
 #### Existing accounts
 
 A password policy applies at *enrollment and password change*, not retroactively. Members who enrolled with a weak password keep it until they change it. There is no forced-reset flow (it was removed — see [Password Reset for Existing Users](./overview.md#password-reset-for-existing-users)), so tightening this does not lock anyone out.
+
+### Collecting the UGA email at enrollment
+
+Enrollment used to collect username and password only, and the UGA address was first asked for at `/complete-profile` on the website. It is now collected on the enrollment form itself, so the address is on file from the moment the account exists.
+
+#### 1. Add the two prompt fields
+
+Flows and Stages → Stages → `enrollment-prompt` → Edit → **Prompts**.
+
+| Field Key | Type | Label | Required |
+|---|---|---|---|
+| `email` | Email | UGA Email | Yes |
+| `password_repeat` | Password | Confirm Password | Yes |
+
+Authentik's Prompt Stage matches two password fields against each other itself, so `password_repeat` needs no policy. Order the fields email → username → password → password repeat.
+
+#### 2. Enforce the UGA domain, with the alumni exemption
+
+Customisation → Policies → Create → **Expression Policy**, named `ktp-uga-email`:
+
+```python
+prompt_data = request.context.get("prompt_data", {})
+email = prompt_data.get("email", "").strip().lower()
+
+# Alumni lose their @uga.edu address at graduation, so theirs is the one
+# invitation that may carry a personal address. The group comes from the
+# invitation's custom attributes — the same place enrollment-assign-group reads
+# it, and the invitation stage runs at order 10, before this one at 20.
+#
+# An unknown or missing group REQUIRES a UGA address, matching requiresUgaEmail
+# in ktp-api: an unrecognised group is a signup, which is exactly the case this
+# rule exists for. Fail closed, not open.
+if prompt_data.get("group") == "alumni":
+    return True
+
+at = email.rfind("@")
+domain = email[at + 1:] if at != -1 else ""
+if domain == "uga.edu" or domain.endswith(".uga.edu"):
+    return True
+
+ak_message("Please use your UGA email address (@uga.edu).")
+return False
+```
+
+:::note If the alumni test case fails, the group isn't reaching `prompt_data` yet
+The alumni exemption depends on the invitation's custom attributes being in `prompt_data` by the time the *prompt* is validated, not just by the time the group is assigned at order 100. Test case 5 below is what proves it. If an alumni invitation with a personal address is rejected, that assumption is wrong for your Authentik version and the exemption needs a different discriminator — a second enrollment flow for alumni is the simplest one.
+:::
+
+Attach it under the stage's **Validation Policies**, alongside `ktp-password-strength`.
+
+:::warning Split on the LAST `@`, and compare the parsed domain
+`email.rfind("@")` and the `== "uga.edu" or .endswith(".uga.edu")` pair are both load-bearing, and they mirror `isUgaAddress` in ktp-api's `services/emails.js` deliberately. A suffix check (`email.endswith("uga.edu")`) accepts `someone@notuga.edu`. A substring check accepts `someone@uga.edu.attacker.com`. Splitting on the first `@` reads `a@b@evil.com` as domain `b`.
+:::
+
+#### 3. Map the `email` scope so it reaches the database
+
+The address is written to the Authentik user by the User Write stage, but ktp-api only learns it if the token carries it.
+
+Applications → Providers → **ktpapp** → Edit → **Advanced protocol settings** → *Scopes* → add **`authentik default OAuth Mapping: OpenID 'email'`**.
+
+Members must sign out and back in once; the claim only appears on newly issued tokens.
+
+:::note `email_verified` is not evidence, and ktp-api ignores it
+That same mapping emits an `email_verified` claim. Nothing in this system ever sends mail to an address to prove someone owns it — the value is what they typed at enrollment — so `middleware/auth.js` deliberately does not gate on it. Authentik agrees: releases before 2025.10 hardcoded it to `true`, and it now defaults to `false` precisely because there is no authoritative source for it. The domain check is the real control.
+:::
+
+#### How it reaches Postgres
+
+`POST /users/sync` runs on every login and seeds `users.email` from the claim, once:
+
+- **It fills an empty column and never overwrites.** Members can edit their UGA email on their profile, and this runs on every login, so mirroring would revert their correction each time they signed in.
+- **Only a UGA address may seed it.** `users.email` is the UGA address; `personal_email` is the other one. Since alumni are exempted above, their enrollment carries a personal address, and ktp-api re-checks the domain rather than trusting the flow. A misconfigured policy cannot put the wrong kind of address in the wrong column.
+- **A missing claim is fine.** Nothing breaks before step 3 is done, which is why the ktp-api half could ship first.
+
+Full reasoning is in the `/users/sync` note in `ktp-api/README.md`; the rules are pinned by `test/enrollmentEmail.test.js`.
+
+:::tip Test the order that catches the real mistakes
+With a throwaway invitation, in a private window:
+
+1. A **non-UGA** address (`someone@gmail.com`) → rejected with your message
+2. A **lookalike** (`someone@notuga.edu`) → rejected. If this one passes, the policy is doing a suffix check
+3. A **subdomain** (`me@mail.uga.edu`) → accepted
+4. **Mismatched** password and repeat → rejected by the stage itself
+5. An **alumni** invitation with a personal address → accepted
+
+Then sign in and confirm the address is on the profile without anyone typing it at `/complete-profile`.
+:::
 
 ### Group Assignment Policy
 
@@ -205,7 +292,8 @@ Group names are **case-sensitive** and must match exactly what's used in the inv
 - If you were adding password requirements, remove the policy from the stage's **Validation Policies** first, then check its **Password field** matches the prompt's actual **Field Key**. A mismatch makes the policy fail *every* password with `Password not set in context`, which renders as this exact error — see [Password requirements](#password-requirements)
 
 **Signup rejects a valid-looking email:**
-- The UGA address requirement is enforced by **ktp-api**, not Authentik — enrollment itself collects no email. The check is in `services/emails.js` and it accepts `uga.edu` and any subdomain, nothing else. Someone without a UGA address yet cannot finish `/complete-profile`
+- The rule is enforced in **two** places now, and they must agree: the `ktp-uga-email` expression policy on the enrollment prompt (see [Collecting the UGA email](#collecting-the-uga-email-at-enrollment)) and `services/emails.js` in ktp-api, which backs `/complete-profile`. Both accept `uga.edu` and any subdomain, nothing else, and both exempt alumni
+- If enrollment accepts an address that `/complete-profile` then rejects, the two have drifted — compare the policy against `isUgaAddress`
 
 **User stuck on /complete-profile after submitting:**
 - Check API logs on LXC 119: `docker logs ktp-api`
