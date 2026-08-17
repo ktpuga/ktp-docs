@@ -843,9 +843,34 @@ Ordered by `display_order`, then `event_date` newest-first, then `id`. `event_da
 
 A file library (bylaws, meeting minutes, course files) shown in the Files & Photos portal tab. Not Immich — arbitrary file types stored on ktp-api's own disk. View: any shared-album-group member.
 
-**Writes have two tiers.** Eboard **and cabinet** (the `chair` group) may *add* (folder, upload, link) and *move*; **only eboard** may *delete* or *set visibility*. Deleting cascades whole subtrees, and visibility is the access-control surface itself, so both stay with eboard.
+**Writes have three tiers.**
 
-Cabinet is not covered by `seesEverything`, so every add and move handler checks that the destination folder is one the caller can actually **see** (`documentFolderModel.findVisibleById`, `findViewableDocument`), not merely that it exists. A destination the caller may not see returns **404, not 403** — a 403 would confirm a restricted folder exists, which is the same reasoning as the download guard.
+| Tier | Groups | May |
+|---|---|---|
+| Contributors | `DOCUMENT_CONTRIBUTOR_GROUPS` — `eboard`, `chair`, `active`, `alumni` | upload a file, add a link, and **rename or delete a row they added** |
+| Cabinet | `eboard`, `chair` | the above, plus create/move/rename folders, move any document, and rename **anyone's** document |
+| Eboard | `eboard` | everything, plus delete **anyone's** row, delete folders, and set visibility |
+
+Rename and delete both route through `ownsOrManages(req, document, managerGroups)` in `documentsController`, with **different manager lists on purpose**:
+
+| | own row | someone else's row |
+|---|---|---|
+| `PATCH /documents/:id` | yes | `eboard` + `chair` — housekeeping |
+| `DELETE /documents/:id` | yes | `eboard` only — it destroys |
+
+A chair renaming another member's file while failing to delete it is the pair that pins that difference down; `test/documentOwnership.test.js` asserts both.
+
+Pledges read the library but do not contribute to it; rushees never reach the router at all.
+
+:::note Folder upload adds no endpoint
+The portal's **Upload Folder** button is a client-side composition of `POST /documents/folders` and `POST /documents` — no bulk endpoint, no transaction. It is therefore **cabinet-only**, because folder creation is: the two cannot disagree without showing members a button that 403s on its first step. See [Uploading a folder](../website/photos-and-documents.md#uploading-a-folder).
+::: Folder deletes cascade whole subtrees, and visibility is the access-control surface itself, so both stay with eboard.
+
+:::warning `DOCUMENT_CONTRIBUTOR_GROUPS` is spelled out, not derived
+It is *not* written as "`SHARED_ALBUM_GROUPS` minus `pledge`", on either side of the stack. A group added to `SHARED_ALBUM_GROUPS` later is being granted **read** access to photos and documents; deriving the contributor list from it would hand that group **write** access silently, and a list whose job is to gate writes must not widen by accident.
+:::
+
+Only eboard is covered by `seesEverything`, so every add, move and delete handler checks that the folder or document is one the caller can actually **see** (`documentFolderModel.findVisibleById`, `findViewableDocument`), not merely that it exists. A target the caller may not see returns **404, not 403** — a 403 would confirm a restricted folder exists, which is the same reasoning as the download guard.
 
 :::caution A document override cannot widen access
 The effective audience of a document is **its folder's audience ∩ its own**. The folder gates navigation (documents are only ever listed by folder) while the document's override gates the row, so restricting a file to a group that is not already in its folder's audience leaves it visible to eboard alone. An override narrows, never widens.
@@ -879,7 +904,7 @@ Lists documents in `folder_id` (omit for the top level).
 
 ### `POST /documents`
 
-**Eboard + cabinet.** Multipart upload, field `file` (any file type, 50MB limit), form field `folder_id` (omit for the top level).
+**Any member except pledges** — `DOCUMENT_CONTRIBUTOR_GROUPS`, i.e. `eboard`, `chair`, `active`, `alumni`. Multipart upload, field `file` (any file type, 50MB limit), form field `folder_id` (omit for the top level).
 
 `folder_id` is validated as an integer id and checked for visibility before the insert. Multer has already written the file to disk by the time the handler runs, so every rejection path unlinks it (`discardUpload`) instead of leaving an orphan behind — disk on this server is limited.
 
@@ -893,7 +918,7 @@ Same file, but `Content-Disposition: inline` — used for the in-portal preview 
 
 ### `POST /documents/link`
 
-**Eboard + cabinet.** An external hyperlink (Google Docs/Slides/Sheets, or any URL) shown alongside real files in the same folder tree — no file on disk. `{ "folder_id": null, "filename": "Meeting Notes", "url": "https://docs.google.com/..." }`. Every document row now carries `kind: "file" | "link"` — link rows have `url` set and no `mime_type`/`file_size`/`storage_path`.
+**Any member except pledges**, same group as the upload above. An external hyperlink (Google Docs/Slides/Sheets, or any URL) shown alongside real files in the same folder tree — no file on disk. `{ "folder_id": null, "filename": "Meeting Notes", "url": "https://docs.google.com/..." }`. Every document row now carries `kind: "file" | "link"` — link rows have `url` set and no `mime_type`/`file_size`/`storage_path`.
 
 ### `PATCH /documents/:id/visibility`
 
@@ -907,7 +932,11 @@ Note the consequence — moving an inheriting document into a more restricted fo
 
 ### `PATCH /documents/:id`
 
-**Eboard + cabinet.** `{ "filename": "March Minutes.pdf" }`. Renaming is grouped with moving rather than with delete and visibility, on the same reasoning: it destroys nothing and it changes nobody's access.
+**The uploader for their own row; eboard and cabinet for any row.** `{ "filename": "March Minutes.pdf" }`. Renaming is grouped with moving rather than with delete and visibility, on the same reasoning: it destroys nothing and it changes nobody's access. Members get it over their own uploads because someone who uploads `Scan_20260817.pdf` should be able to call it `Fall Dues Receipt` without finding a chair.
+
+Same two-failure split as `DELETE` below — **404** if the caller cannot see the document, **403** if they can see it but did not add it and are not cabinet. Body validation runs *before* the lookup, so a blank or over-long name is a **400** whoever sends it; that leaks nothing, since it is the same answer for an id that does not exist.
+
+Folder renames (`PATCH /documents/folders/:id`) stay **cabinet-only** — a folder has no uploader, so there is no "their own" for a member to have.
 
 This renames the **display name only**, for uploads and links alike (`filename` is the label for both). `storage_path` is deliberately untouched, so the file on disk keeps the name it was stored under and every existing download keeps working.
 
@@ -921,7 +950,17 @@ This renames the **display name only**, for uploads and links alike (`filename` 
 
 ### `DELETE /documents/:id`
 
-**Eboard only.** Removes the DB row and, for `kind: "file"` rows, unlinks the file from disk (link rows have nothing on disk to clean up).
+**The person who added the row, or eboard for any row.** Removes the DB row and, for `kind: "file"` rows, unlinks the file from disk (link rows have nothing on disk to clean up).
+
+This is the one document route whose answer the router cannot decide on its own — it depends on who uploaded the row — so `requireGroup` only establishes that the caller is a contributor, and ownership is enforced in the controller.
+
+:::warning Two different failures, deliberately
+**Visibility is checked before ownership.** A document the caller cannot *see* answers **404**; one they can see but did not add answers **403**.
+
+Answering 403 in the first case would confirm that a document exists inside a restricted folder to anyone willing to walk the ids, which is exactly what the audience model exists to prevent. The consequence to expect: a member's own upload becomes a 404 to them once eboard moves it into a folder they cannot see.
+
+A `NULL` `uploaded_by` — the uploader's account was hard-deleted — matches nobody rather than matching a caller whose id came through undefined, so those rows are eboard-only.
+:::
 
 ---
 

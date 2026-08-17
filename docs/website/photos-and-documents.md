@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # Photos & Documents
 
-The **Files & Photos** portal tab has two parts: a member-facing photo/album system, and a document library eboard and cabinet manage. There's also a completely separate, fully public homepage gallery. See [API: Photos & Albums](../api/endpoints.md#photos--albums) for the backend routes behind all of this.
+The **Files & Photos** portal tab has two parts: a member-facing photo/album system, and a document library every member but pledges can contribute to. There's also a completely separate, fully public homepage gallery. See [API: Photos & Albums](../api/endpoints.md#photos--albums) for the backend routes behind all of this.
 
 ---
 
@@ -37,14 +37,59 @@ Photos are stored in Immich, but never exposed directly to the browser — ktp-a
 
 A nested folder/file library for things like bylaws, meeting minutes, and course files — a completely different storage system from photos, since these are arbitrary file types (PDFs, Word docs, etc.), not something Immich handles well. Files live directly on ktp-api's own disk.
 
-- **Eboard and cabinet** (the `chair` group): create folders (nested to any depth), upload files, add external links, and move or rename a file or folder.
-- **Eboard only**: delete files/folders/links, and set visibility. Deleting cascades a whole subtree and visibility is the access-control surface itself, so neither is handed to cabinet.
-- **Any shared-album-group member**: browse, download, preview.
+- **Any member except pledges** (`eboard`, `chair`, `active`, `alumni`): upload files, add external links, and **rename or delete a file or link they added themselves**.
+- **Eboard and cabinet** (the `chair` group), additionally: create folders (nested to any depth), move a file or folder, and rename *anyone's* file or folder.
+- **Eboard only**: delete *other people's* files, delete folders, and set visibility. Folder deletes cascade a whole subtree and visibility is the access-control surface itself, so neither is handed to cabinet.
+- **Any shared-album-group member** (pledges included): browse, download, preview.
 
-`RevampedPhotoFiles` therefore derives **two** flags, `isEboard` and `canManageDocs` (`isEboard || chair`), and passes both down. The toolbar is gated on `canManage`; the per-row delete and lock buttons stay on `isEboard`; `NewFolderModal` hides `VisibilityControl` for cabinet, so a folder a chair creates is unrestricted. **A single boolean cannot express these two tiers** — collapsing them back is how cabinet silently gains delete.
+`RevampedPhotoFiles` derives **three** page-level flags and passes them down: `isEboard`, `canManageDocs` (`isEboard || chair`), and `canContributeDocs` (any of `DOCUMENT_CONTRIBUTOR_GROUPS`). The toolbar splits — New Folder on `canManage`, Upload File and Add Link on `canContribute`. Move and drag stay on `canManage`; the lock button stays on `isEboard`.
+
+Rename and delete are then **per-row**, not per-page, both derived from one `isOwnUpload` computed in the table's `map`:
+
+| Row action | Shown when |
+|---|---|
+| Rename | `canManage \|\| isOwnUpload` |
+| Delete (file or link) | `isEboard \|\| isOwnUpload` |
+| Delete (folder) | `isEboard` — folders have no uploader |
+
+`isOwnUpload` is `doc.kind !== 'folder' && doc.uploaded_by != null && doc.uploaded_by === currentUserId`. Both guards earn their place: folders carry `created_by` rather than `uploaded_by`, and a row whose uploader was hard-deleted carries `uploaded_by: null`, which would compare equal to an undefined `currentUserId` before the session loads. `NewFolderModal` still hides `VisibilityControl` for cabinet, so a folder a chair creates is unrestricted.
+
+**A single boolean cannot express these tiers** — collapsing them back is how a plain member silently gains folder delete. The UI only decides what is worth *showing*; the API re-checks every one of these.
+
+:::warning Pledges read but do not contribute
+`DOCUMENT_CONTRIBUTOR_GROUPS` is deliberately spelled out in full on both sides (`ktp-api/constants.js` and `PhotoFiles.jsx`) rather than derived by filtering `pledge` out of `SHARED_ALBUM_GROUPS`. A group added to the shared-album list later is being granted **read** access; deriving from it would hand that group **write** access silently.
+:::
 - **In-portal preview**: clicking a document opens a modal without leaving the page — images render inline, PDFs render in an embedded viewer, and anything else (Word, Excel) shows a "download instead" message rather than a broken preview attempt. Implemented as a small hand-rolled modal, not a UI-library dialog — matches how `Tabs` is already hand-rolled in this codebase.
 - The document icon in the file list shows an actual thumbnail for images; everything else gets a generic file icon.
-- **External links**: a document doesn't have to be a real file — eboard can add a link (a Google Doc, Slides deck, Sheet, or any URL) that shows up in the same folder tree with a distinct external-link icon. Clicking one opens the URL directly in a new tab instead of going through the download/preview flow. Useful for anything that already lives outside the chapter's own storage (shared Google Docs, external forms, etc.) without needing to export/re-upload it.
+- **External links**: a document doesn't have to be a real file — any member but a pledge can add a link (a Google Doc, Slides deck, Sheet, or any URL) that shows up in the same folder tree with a distinct external-link icon. Clicking one opens the URL directly in a new tab instead of going through the download/preview flow. Useful for anything that already lives outside the chapter's own storage (shared Google Docs, external forms, etc.) without needing to export/re-upload it.
+
+### Uploading a folder
+
+**Cabinet and eboard only**, and that follows from something rather than being a separate policy: the feature creates folders as it walks, and `POST /documents/folders` is cabinet-only. Putting the button on `canContribute` would show every member a control that 403s on its first step. **If members should get folder upload, folder creation has to open up first** — the two cannot disagree.
+
+**There is no API work behind this.** It is a client-side composition of the two endpoints that already exist, `POST /documents/folders` and `POST /documents`. No bulk endpoint, no transaction, no new permissions.
+
+`planFolderUpload(fileList)` turns the flat `FileList` a `webkitdirectory` input produces into an ordered plan, then `runFolderUpload` walks it: folders shallowest-first, then every file.
+
+:::warning `webkitRelativePath` is the only thing carrying the structure
+The `File` objects a directory input yields are **flat**, and `file.name` is just the basename. Read `file.name` instead of `file.webkitRelativePath` and a nested tree uploads as a pile into one folder, with no error anywhere.
+
+Two consequences fall out of the same fact:
+
+- **Every ancestor must be registered, not just the deepest directory.** A tree whose only file is `a/b/c/deep.pdf` names `a/b/c` and nothing else, so `a` and `a/b` have to be inferred or the leaf is created under a parent that does not exist.
+- **Empty directories are invisible.** A directory input reports files, so a folder with nothing beneath it cannot be seen and is not recreated. The confirm step says so rather than leaving it to be noticed later.
+:::
+
+Four decisions worth keeping:
+
+- **Sequential, not parallel.** `/documents` has no rate limit, files run to 50MB, and the progress count has to mean something. One at a time is also what makes a failure isolable to a named file.
+- **Nothing aborts the run except a redirect.** A file over the cap or a name the API rejects is recorded and the walk continues; stopping at the first problem would leave a half-made tree with no report of where it stopped. Only `redirect('/login')` propagates.
+- **Same-named folders are reused, not duplicated**, so uploading the same tree twice merges. Only folders the member can *see* are candidates — merging into a restricted folder they cannot open would be writing somewhere invisible to them.
+- **The level is re-read at the end** rather than splicing results into local state. The run creates rows at depths the table is not showing, and only some are children of the open folder.
+
+There is a **100 file cap** (`MAX_FOLDER_UPLOAD_FILES`), checked in the confirm step where the number can be shown rather than silently truncating. The confirm step itself is not ceremony: this is the only bulk write in the portal and folders can only be deleted by eboard, so "I picked the wrong directory" is somebody else's cleanup.
+
+New folders are created **unrestricted**, exactly like the New Folder dialog does for cabinet — there is no per-folder visibility control in a bulk flow. Set visibility afterwards if the tree needs it.
 
 ### Moving files and folders
 
@@ -78,7 +123,9 @@ Two smaller things that are easy to regress:
 
 ### Renaming
 
-`PATCH /documents/:id` and `PATCH /documents/folders/:id`, both eboard + cabinet, driven by one `RenameModal` for both tables (a folder's label is `name`, a document's is `filename`).
+`PATCH /documents/:id` and `PATCH /documents/folders/:id`, driven by one `RenameModal` for both tables (a folder's label is `name`, a document's is `filename`).
+
+**The two routes have different permissions**, which is why the button is gated per row rather than per page. Document rename is open to **the uploader for their own row, plus eboard and cabinet for any row**; folder rename stays **eboard + cabinet**, because a folder has no uploader for a member to be.
 
 **The dialog preselects the basename, the way a file manager does.** Renaming `minutes-3-4.pdf` should not mean retyping `.pdf` or silently dropping it. `mime_type` still drives the in-portal preview either way, but a file downloaded without its extension is one the member's own OS cannot open. Folders and links have no extension to protect, so they select whole.
 
