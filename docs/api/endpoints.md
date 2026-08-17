@@ -580,6 +580,31 @@ DB-only membership (no Authentik group per committee) — same shape as Group Ch
 
 **Auth required.** All committees, with member count and whether the caller is a member/chair of each.
 
+### `GET /committees/activity`
+
+**Auth required.** Per-committee "what is new for me", backing both the Committees page markers and the sidebar badge:
+
+```json
+[{ "committee_id": "3", "new_count": 2, "pending_count": 0 }]
+```
+
+- `new_count` — **events and announcements** targeted at that committee, created since the caller last opened it, excluding their own posts. Deliberately **only the caller's own committees**; eboard is *not* `seesEverything` here, or their badge would never be zero.
+- `pending_count` — join requests the caller can actually action (eboard anywhere, or chair of that committee), never including their own request. Present for committees eboard is not a member of, since they are the people most likely to clear the queue.
+
+The two are returned separately and only the sidebar adds them: one is news to read, the other people waiting on you.
+
+:::warning Registered above every `/:id` route, and must stay there
+Express matches `/:id` against a single segment, so a later `GET /committees/:id` would answer `/activity` with the committee handler and look up a committee whose id is the string `"activity"`. There is no `GET /:id` today — which is exactly why this is worth stating, since the trap only springs when someone adds one. Same failure the homepage-photos `/collections` route hit.
+:::
+
+**Both signals already badge other tabs** — a committee event also counts toward Calendar, a committee announcement toward Announcements. That overlap is intended and was chosen explicitly; it is not a double-counting bug to fix.
+
+### `POST /committees/:id/seen`
+
+**Auth required.** Marks one committee read, called when a member opens its detail view — *not* when they open the Committees page. `204` on success, `404` if the committee does not exist.
+
+No membership check, deliberately: the cursor is private to the caller and grants nothing, a row for a committee they are not in is never selected by the activity query, and requiring membership would `403` the legitimate case of eboard opening a committee they do not belong to.
+
 ### `POST /committees`
 
 **Eboard only.** `{ "name": "..." }`
@@ -847,8 +872,8 @@ A file library (bylaws, meeting minutes, course files) shown in the Files & Phot
 
 | Tier | Groups | May |
 |---|---|---|
-| Contributors | `DOCUMENT_CONTRIBUTOR_GROUPS` — `eboard`, `chair`, `active`, `alumni` | upload a file, add a link, and **rename or delete a row they added** |
-| Cabinet | `eboard`, `chair` | the above, plus create/move/rename folders, move any document, and rename **anyone's** document |
+| Contributors | `DOCUMENT_CONTRIBUTOR_GROUPS` — `eboard`, `chair`, `active`, `alumni` | upload a file, add a link, **create a folder** (unrestricted only), and **rename or delete a row they added** |
+| Cabinet | `eboard`, `chair` | the above, plus **move** folders and documents, rename folders, and rename **anyone's** document |
 | Eboard | `eboard` | everything, plus delete **anyone's** row, delete folders, and set visibility |
 
 Rename and delete both route through `ownsOrManages(req, document, managerGroups)` in `documentsController`, with **different manager lists on purpose**:
@@ -882,7 +907,13 @@ Lists subfolders of `parent_id` (omit for the top level).
 
 ### `POST /documents/folders`
 
-**Eboard + cabinet.** `{ "name": "...", "parent_id": null }` — folders nest to any depth. A non-eboard caller that sends a non-empty `audience`/`committee_ids` gets a **403** rather than having it quietly dropped: silently ignoring it would tell a chair their folder is restricted when every member can see it.
+**Any member except pledges.** `{ "name": "...", "parent_id": null }` — folders nest to any depth. A non-eboard caller that sends a non-empty `audience`/`committee_ids` gets a **403** rather than having it quietly dropped: silently ignoring it would tell them their folder is restricted when every member can see it. A non-eboard caller also gets **404** (not 403) for a `parent_id` they cannot see.
+
+:::note Tied to the file upload, not independently chosen
+This is open to the same groups as `POST /documents` **by necessity**, not by separate policy: the portal's Upload Folder walks a picked directory and creates a folder per level, so gating the two differently shows members a button that 403s on its first step. Open or close them together.
+
+Folder **deletion** stays eboard-only regardless, and that asymmetry is deliberate — creating a folder adds an empty container, deleting one cascades the whole subtree including other people's files.
+:::
 
 ### `PATCH /documents/folders/:id/visibility`
 
@@ -1250,10 +1281,16 @@ Updates any supplied boolean; **omitted fields keep their prior value**, so olde
 Per-tab badge counts for the web portal sidebar:
 
 ```json
-{ "announcements": 3, "calendar": 1, "meetings": 0, "polls": 2, "files": 0, "interviews": 0 }
+{ "announcements": 3, "calendar": 1, "meetings": 0, "polls": 2, "files": 0, "interviews": 0, "committees": 2 }
 ```
 
 Each count is "items in this tab created after your cursor for it, that you are allowed to see". **On the first call for a user the cursors are seeded to now and every count is 0** — existing content is never retroactively unread.
+
+:::note Two counts here ignore their tab cursor
+`meetings` counts **unanswered invitations**, and `committees` sums **per-committee** counts plus approval queues. Neither is "new since you last looked", so neither clears by visiting the tab — see `CLEARS_ON_ACTION_NOT_VIEW` on the website side. Their cursor rows are still written and simply unused.
+
+`committees` is the sharper case: its unit of "seen" is the **committee**, not the tab, so it drains as each committee is opened. Zeroing it on arrival would blank the roll-up while every per-committee marker underneath stayed lit.
+:::
 
 Counts honour the same audience rules as the corresponding list endpoint, so a badge can never advertise something the caller cannot open. In particular an untargeted announcement or event badges **members only, never rushees**, and a rushee's `announcements` count comes from `rush_announcements` instead.
 
@@ -1261,7 +1298,7 @@ Also quiet on purpose: you are never counted for content you posted yourself, an
 
 ### `POST /notifications/seen/:tab`
 
-Moves that tab's cursor to now — i.e. marks it read. `204` on success. `tab` must be one of `announcements`, `calendar`, `meetings`, `polls`, `files`, `interviews`; anything else is a `400`.
+Moves that tab's cursor to now — i.e. marks it read. `204` on success. `tab` must be one of `announcements`, `calendar`, `meetings`, `polls`, `files`, `interviews`, `committees`; anything else is a `400`. The list is enforced by a **CHECK constraint** on `notification_cursors.tab` as well as in code, so adding a tab needs a migration.
 
 **Behavior worth knowing:** DM alerts fire only after the message is persisted, only to the permitted recipient, and **never include the message body**. Event alerts fire on create, material update, or cancellation, to users who can actually see that event and have event notifications enabled. APNs failures are logged and never fail the underlying message/event request — a push that doesn't arrive is not a reason to suspect the send itself failed.
 

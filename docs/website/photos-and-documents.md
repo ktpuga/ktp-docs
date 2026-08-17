@@ -37,12 +37,12 @@ Photos are stored in Immich, but never exposed directly to the browser — ktp-a
 
 A nested folder/file library for things like bylaws, meeting minutes, and course files — a completely different storage system from photos, since these are arbitrary file types (PDFs, Word docs, etc.), not something Immich handles well. Files live directly on ktp-api's own disk.
 
-- **Any member except pledges** (`eboard`, `chair`, `active`, `alumni`): upload files, add external links, and **rename or delete a file or link they added themselves**.
-- **Eboard and cabinet** (the `chair` group), additionally: create folders (nested to any depth), move a file or folder, and rename *anyone's* file or folder.
+- **Any member except pledges** (`eboard`, `chair`, `active`, `alumni`): upload files, add external links, **create folders** (nested to any depth, always unrestricted), **upload a whole folder**, and **rename or delete a file or link they added themselves**.
+- **Eboard and cabinet** (the `chair` group), additionally: **move** a file or folder, rename folders, and rename *anyone's* file.
 - **Eboard only**: delete *other people's* files, delete folders, and set visibility. Folder deletes cascade a whole subtree and visibility is the access-control surface itself, so neither is handed to cabinet.
 - **Any shared-album-group member** (pledges included): browse, download, preview.
 
-`RevampedPhotoFiles` derives **three** page-level flags and passes them down: `isEboard`, `canManageDocs` (`isEboard || chair`), and `canContributeDocs` (any of `DOCUMENT_CONTRIBUTOR_GROUPS`). The toolbar splits — New Folder on `canManage`, Upload File and Add Link on `canContribute`. Move and drag stay on `canManage`; the lock button stays on `isEboard`.
+`RevampedPhotoFiles` derives **three** page-level flags and passes them down: `isEboard`, `canManageDocs` (`isEboard || chair`), and `canContributeDocs` (any of `DOCUMENT_CONTRIBUTOR_GROUPS`). **The whole toolbar is now one gate, `canContribute`** — New Folder, Upload Folder, Upload File and Add Link are all "add" actions on the same tier. Move and drag stay on `canManage`; the lock button stays on `isEboard`.
 
 Rename and delete are then **per-row**, not per-page, both derived from one `isOwnUpload` computed in the table's `map`:
 
@@ -65,7 +65,7 @@ Rename and delete are then **per-row**, not per-page, both derived from one `isO
 
 ### Uploading a folder
 
-**Cabinet and eboard only**, and that follows from something rather than being a separate policy: the feature creates folders as it walks, and `POST /documents/folders` is cabinet-only. Putting the button on `canContribute` would show every member a control that 403s on its first step. **If members should get folder upload, folder creation has to open up first** — the two cannot disagree.
+**Open to any member except pledges**, the same tier as the single-file upload. That is not an independent policy choice: the feature creates a folder per directory it walks, so **Upload Folder and New Folder must share a gate** — split them and one becomes a button that 403s on its first step. They were briefly cabinet-only, which is exactly the mismatch that produced a "members can't upload folders" report.
 
 **There is no API work behind this.** It is a client-side composition of the two endpoints that already exist, `POST /documents/folders` and `POST /documents`. No bulk endpoint, no transaction, no new permissions.
 

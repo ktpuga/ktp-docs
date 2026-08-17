@@ -16,9 +16,9 @@ The one that matters most in practice: **push only reaches people who installed 
 
 ## Tab badges
 
-Every portal sidebar item can carry a count. Six tabs do: **Announcements, Calendar, Meetings, Polls, Files & Photos, Interviews**. Messages carries one too, from a different mechanism (below).
+Every portal sidebar item can carry a count. Seven tabs do: **Announcements, Calendar, Meetings, Polls, Files & Photos, Interviews, Committees**. Messages carries one too, from a different mechanism (below).
 
-Visiting a tab clears its badge. The tab you are currently looking at never shows one.
+Visiting a tab clears its badge — with three deliberate exceptions: **Meetings**, the **Calendar's pending-RSVP count**, and **Committees**. The tab you are currently looking at never shows one, again except those three.
 
 ### How "new" is decided
 
@@ -44,6 +44,25 @@ The counts re-implement each tab's visibility rules, so they have to agree with 
 - **You are never badged for something you posted.** Eboard writes most of the content; being told about your own announcement is how people learn to ignore a badge.
 - **Closed and expired polls, and cancelled meetings, don't badge.** A badge that leads somewhere you can't act on is noise.
 - **Interviews badge when a schedule is published, not when it was created.** Schedules are built as drafts and released later — often days later, since entering forty slots takes a while — so creation time would badge while nothing was bookable yet. The badge also clears once the rushee books a slot, because signing up was the only thing it was asking for.
+
+### Committees is different: the unit of "seen" is the committee
+
+Every other tab asks "is there anything new *here*". Committees has to answer "which committee has something new", and a per-tab cursor cannot express that. Worse, it would break the feature outright: `markTabSeen('committees')` fires on navigation, so every per-committee marker would clear the instant the page opened and the member would watch them vanish before reading them.
+
+So committees get their own cursor table, `committee_view_cursors`, keyed `(user_id, committee_id)` and moved when the member opens **that committee's detail view**. The sidebar number is the sum of the per-committee counts, which means it **drains as each committee is read** rather than all at once on arrival. That is why `committees` sits in `CLEARS_ON_ACTION_NOT_VIEW` alongside `meetings`.
+
+What counts:
+
+- **New events and announcements** targeted at the committee, excluding your own posts. Files in a committee's shared folder and "a new member joined" were both considered and left out.
+- **Pending join requests you can action** — eboard anywhere, chair of that committee only. This one is not a cursor count at all: it clears when the request is **decided**, not when the page is viewed, exactly like an unanswered meeting invitation.
+
+On the page the two are shown **separately** ("3 new" and "2 requests"); only the sidebar adds them, because there the question is just "is there anything for me".
+
+:::note The overlap with Calendar and Announcements is intended
+A committee event badges **both** Calendar and Committees; a committee announcement badges both Announcements and Committees. That was chosen deliberately, with the alternative on the table. **It is not a double-counting bug to fix.** The one signal that would have badged nowhere else — new members joining, available via `committee_members.joined_at` — is the one that was left out.
+:::
+
+**Scope is your own committees, eboard included.** Eboard is `seesEverything` almost everywhere else; applying that here would badge them for every committee in the chapter, and a permanently non-zero number is one people learn to ignore. The approval queue is the single exception: eboard sees pending requests for committees they are not members of, since they are the people most likely to clear them.
 
 ### Messages is different, on purpose
 
