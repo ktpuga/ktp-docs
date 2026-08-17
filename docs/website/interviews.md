@@ -279,6 +279,77 @@ Deleting a booked slot, or a round containing bookings, returns **409 with `code
 
 A push goes out only when *someone else* cancelled it for you. You don't need a notification about the button you just pressed.
 
+## Interview notes
+
+What an interviewer thought of a candidate. **Readable and writable only by eboard and by the members signed up to run the slot that candidate is booked into** — never by the candidate, under any request shape.
+
+One note per interviewer per candidate per round: `UNIQUE (schedule_id, candidate_id, author_id)`. The alternative, one shared note per candidate, is a lost update with no detection — two interviewers on a `interviewer_capacity: 2` slot open the same box and the second save silently discards the first. Booking is the only contended write in this codebase and it needed a real `FOR UPDATE` transaction to get right; a second one, for a textarea, is a bad trade.
+
+### The note is anchored to the CANDIDATE and the ROUND, not the booking
+
+This is the design decision the whole feature turns on, and the obvious column is the wrong one.
+
+`interview_bookings.id` looks right: a slot holds several bookings, so the booking is the row meaning "this person at this time". It is also **a row the candidate can delete.** `cancelBooking` allows `isOwn` with no further check, and `book()` refuses a second booking — so **rescheduling requires cancelling first.**
+
+:::danger A booking-anchored note is destroyed by rescheduling
+A candidate moving from Tuesday to Wednesday would silently erase every evaluation written about them, after the evaluations exist, by the one person they are being kept from.
+
+Refusing the cancel is not the way out: declining to let someone reschedule *because a note exists* tells them a note exists.
+:::
+
+So notes key on `(schedule_id, candidate_id)` — the same unit `interview_bookings` already declares a candidate to be with its own `UNIQUE (schedule_id, user_id)`. `booking_id` is kept as **nullable provenance**, `ON DELETE SET NULL`, recording which sitting a note came from without ever being how the row is found. Eboard's `?force=true` slot delete stops eating them for free.
+
+### `author_id` is `ON DELETE SET NULL`, with the name denormalised
+
+Deleting a user in Authentik **hard-deletes** the row here — `webhooksController` runs a real `DELETE FROM users` on a `model_deleted` event, which is not the soft `deleted_at` path. Under `ON DELETE CASCADE`, removing one graduating senior from the IdP would erase every note they ever wrote, across every candidate.
+
+`author_name` is written alongside and reads render `COALESCE(<live join on users>, author_name)`, so an ordinary rename still shows through and only a deleted account falls back to the stored copy. Postgres treats NULLs as distinct in a `UNIQUE`, so orphaned notes never collide.
+
+### Three permission tiers, not two
+
+| Tier | Who | Sees |
+|---|---|---|
+| `all` | eboard/chair, or currently signed up on the candidate's slot | every note on that candidate |
+| `own` | wrote a note here and has since **withdrawn** from the slot | only their own, and can still edit or retract it |
+| — | anyone else | `403` |
+
+Slot membership is a **current** claim and authorship is a **standing** one. Collapsing them into one live check means an interviewer who drops a night they can no longer cover loses the ability to read or correct what they themselves wrote, while eboard carries on reading it.
+
+:::warning `GET` returns `{ access, notes }`, and the client must render the difference
+A caller in the `own` tier gets a `200` carrying **one** note when three exist. A UI handed only the array shows "1 note" and is confidently wrong at a decision meeting.
+
+`access` comes from the API rather than being derived from `slot.i_am_interviewing` in the component, because a client-side copy of a server rule is free to drift the day the rule changes.
+:::
+
+### Eboard deletes but never edits
+
+A note is a named person's judgement, so rewriting it would make the attribution false — the opposite of a profile, which eboard *can* edit because it is a record of fact. Delete is the escape hatch, so something inappropriate can be removed without opening a SQL client. There is deliberately no edit control on another person's note anywhere in the UI, and no route that could reach one: saving always writes the **caller's** row.
+
+### Two failures that must not answer alike
+
+| Situation | Answer |
+|---|---|
+| A note the caller cannot see | `404` |
+| One they can see but didn't write | `403` |
+
+Note ids are sequential `SERIAL`s, so a single `403` for an unreadable note turns `DELETE /interviews/notes/:id` into an existence oracle: walk the ids, count the refusals, learn how many evaluations have been written. Same rule and same reasoning as the [document library](./photos-and-documents.md).
+
+### Notes are not on `BOOKINGS_JSON`
+
+That shared SQL fragment is used by `findScheduleForManagement` **and** `findForInterviewer`, and `findForInterviewer` selects `WHERE s.schedule_id = ANY(...)` — every slot of every round a member may staff, not only the ones they claimed. A `notes` key on it would hand every committee member every note in the round. Notes are their own caller-keyed query.
+
+`findAvailableForUser` and `findForCalendar` do not use `BOOKINGS_JSON` at all, so the rushee-facing and ICS paths are structurally clear. A test asserts that neither carries a note, nor even an empty `notes` key, under any request shape.
+
+### Archiving keeps them
+
+`archiveModel.snapshotRushHistory` writes notes into `rush_history` as a third parallel query alongside events and interviews, for the same reason those two are there: `candidate_id` cascades from `users`, so the rows are unrecoverable the moment the live user row goes. Denormalised the same way — the round's **title** and the author's **name**, not their ids — because the point is to still be readable in a year.
+
+### The activity log captures them, by doing nothing
+
+The global middleware already logs every mutating request. The DM argument for skipping runs backwards here: DMs are skipped because eboard is not allowed to see them, and here eboard **is** the audience.
+
+`SAFE_SUMMARY_KEYS` is an allowlist and the field is named `body`, which is not on it — so the log records *that* a note was written, by whom and when, and can never record what it said. `title`, `name` and `status` **are** on that list; if a rating is ever added to notes, do not name it any of those.
+
 ## Calendars
 
 A booked interview lands on the rushee's portal calendar and their [calendar subscription](./calendar-subscription.md). `interviewModel.findForCalendar` shapes rows like events (`title`, `description`, `location`, `startDate`, `endDate`) so both merges work without a second formatter.
@@ -320,6 +391,21 @@ Gated `SHARED_ALBUM_GROUPS` at the route, then by committee designation in the c
 | `POST` | `/interviews/slots/:id/interviewers` | Claim a spot. Eboard may pass `{ user_id }` to assign someone |
 | `DELETE` | `/interviews/slots/:id/interviewers/:userId` | Withdraw. Yours, or anyone's if you manage interviews |
 
+### Interview notes — members, **never rushees**
+
+Same `SHARED_ALBUM_GROUPS` route gate, then decided per row in the controller. Addressed by **booking** id, which is what every rushee chip already carries; stored by candidate and round.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/interviews/bookings/:id/notes` | `{ access, notes }`. `access` is `all` or `own` |
+| `PUT` | `/interviews/bookings/:id/notes` | Upsert **your own** note. `{ body }`. `PUT`, so saving twice edits |
+| `DELETE` | `/interviews/notes/:noteId` | Yours, or anyone's if you manage interviews. `404` if you cannot see it |
+| `GET` | `/interviews/schedules/:id/notes` | Decision-night view: the whole round, grouped by candidate. **`eboard` + `chair` only** |
+
+:::warning The route gate is not redundant
+The router opens with `requireGroup(...RUSH_ACCESSIBLE_GROUPS)`, so **a rushee reaches every handler in the file** — including the ones serving the notes written about them. Each notes route carries its own `requireGroup(...SHARED_ALBUM_GROUPS)`, and that layer must never be removed for looking duplicative.
+:::
+
 ### Management — `eboard` + `chair`
 
 | Method | Path | Notes |
@@ -354,11 +440,12 @@ Rather than a `router.use()` above the management block. A router-level guard wo
 | `MAX_SLOTS_PER_SCHEDULE` | 500 | Guards a runaway script, not eboard's typing speed |
 | `MAX_TITLE` | 150 | |
 | `MAX_DESCRIPTION` | 2000 | |
+| `TEXT_LIMITS.INTERVIEW_NOTE` | 3000 | One note. The constraint is a reading one: eboard opens a candidate and reads every note on them at once |
 
 ## Not built
 
-- **The member-facing interviewer page.** `/member/interviews` does not exist yet. The API (`GET /interviews/interviewer-schedules` and the two signup routes) is complete and tested; only the page and its nav entry are missing, so today interviewer signup is reachable by API alone.
 - **Adding an interviewer from the eboard slot form.** Eboard sets the maximum and can *remove* a signup, but the form no longer has a person picker. `POST …/interviewers` accepts `{ user_id }`, so it's a button away.
+- **Ratings on interview notes.** Free text only. A rating column is additive later and Swift's `JSONDecoder` ignores unknown keys, so nothing is foreclosed — but see the naming warning above.
 - **Waitlists.** If a slot or an interviewer spot frees up, whoever refreshes first gets it.
 - **Automatic interviewer assignment.** Members self-select; nothing balances coverage or warns about an unstaffed slot.
 - **Reminders before the interview.** Only the calendar entry.
