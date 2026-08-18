@@ -1015,7 +1015,34 @@ Valid `audience` values are `eboard`, `chair`, `active`, `pledge`, `alumni` and 
 
 ### `DELETE /announcements/:id`
 
-**Eboard only.**
+**Eboard only.** Cascades the announcement's media rows and deletes their Immich assets.
+
+### Photos, videos and links
+
+Both announcement boards carry up to **10** photos or videos and up to **5** labelled links, added on migration `1788600000000`.
+
+`POST` and `PUT` answer **both `application/json` and `multipart/form-data`** — multer leaves a non-multipart request untouched, so the plain JSON path is unchanged for posts that carry nothing. Files ride in a `media` field; up to 100 MB each; JPEG, PNG, WebP, HEIC, MP4, MOV and WebM.
+
+:::warning Multipart turns every field into a string
+`audience` and `links` are JSON-encoded into the form body and parsed back by a shim on the API. Send them as anything else and the error you get names the audience, not the encoding.
+:::
+
+:::info Uploading is part of the create request, not a follow-up call
+`createAnnouncement` responds and *then* fires push and email. A two-step upload notifies the chapter about a post whose photos have not arrived yet. Files reach Immich **before** the row is inserted and are **all-or-nothing** — if one of five fails the other four are deleted and nothing is posted.
+:::
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/announcements/media/:mediaId` | The bytes. `?size=thumbnail\|preview` for tiles; Range headers forwarded so video seeks |
+| `DELETE` | `/announcements/media/:mediaId` | Eboard only. New files **append** on `PUT`, so this is the only way media comes off |
+| `GET` | `/rush-announcements/media/:mediaId` | Same, and open to **rushees** — a photo on a rush announcement is for them |
+| `DELETE` | `/rush-announcements/media/:mediaId` | Eboard + chair |
+
+Both boards share one `announcement_media` table with **two nullable foreign keys and a CHECK that exactly one is set**, rather than a polymorphic `parent_type`/`parent_id` pair Postgres could not enforce. Each endpoint refuses ids belonging to the other board with a **404**.
+
+`asset_id` is never returned to a client. Bytes come through the media route, which re-asks the same visibility SQL the list read uses, so a photo on a committee-only announcement cannot outlive the rule it was posted under. **404, not 403** — the ids are sequential.
+
+Links are `[{ label, url }]`, validated by `services/linkList.js`, shared with profile links. The URL is judged by **protocol**: `new URL()` is not a check, since it parses `javascript:alert(1)` without complaint.
 
 ---
 
