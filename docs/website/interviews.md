@@ -350,6 +350,34 @@ The global middleware already logs every mutating request. The DM argument for s
 
 `SAFE_SUMMARY_KEYS` is an allowlist and the field is named `body`, which is not on it — so the log records *that* a note was written, by whom and when, and can never record what it said. `title`, `name` and `status` **are** on that list; if a rating is ever added to notes, do not name it any of those.
 
+### Bullets, and where the structure lives
+
+Notes are bulleted, and the bullets are **not in the database**. `body` is still one `TEXT` column; `lib/interview-note-format.js` parses lines beginning `-`, `*` or `•` at render time and the editor helps you type them (Enter continues the list, Tab indents one level). Depth is capped at **two levels**, because a third is unreadable projected on a wall.
+
+This was chosen over storing an array of bullet objects. A structured column would have meant a migration, a changed response shape that iOS reads later, and rewriting every note test that keys on `body` being a string — to buy formatting that a parser gives for free. Every note written before the format existed still renders: a line with no marker is a paragraph.
+
+`*` and `•` are accepted on input because these notes are pasted out of Google Docs and Slides, which is the workflow the feature replaced.
+
+:::warning Tab is only intercepted on a bullet line
+Swallowing Tab everywhere inside a textarea traps keyboard users in the control with no way out. Off a bullet, Tab moves focus like it does anywhere else. `bulletKeyDown` returns `null` to say "not mine", and the component only calls `preventDefault()` when it returns a value.
+:::
+
+The caret position is returned by that same pure function and applied in an effect, never in the key handler. The textarea is controlled, so at the moment the key is handled React has not painted the new value and setting `selectionStart` there positions the caret in the **old** string — which is every "the cursor jumps to the end when I press Enter" bug in a controlled editor.
+
+### Decision night
+
+`/admin/interviews` → open a round → **Decision night**. One candidate per screen, projected: photo and identity on the left, every interviewer's notes on the right, arrow keys or space to advance, Esc to close. It replaces a Google Slides deck that was rebuilt by hand every round.
+
+It reads `GET /interviews/schedules/:id/notes`, which carries `candidate_name`, `profile_picture_asset_id`, `major` and `graduation_date` per candidate. Those last three ride on the **round-wide** read only — `findForCandidate`, the panel an interviewer opens mid-round, has no reason to carry profile data and does not.
+
+`graduation_date` is free text a member typed (`"Spring 2028"`), not a date. It is rendered as stored; nothing parses it.
+
+:::info Only candidates with at least one note appear
+The deck is driven by `interview_notes`, not by the booking list, so a candidate nobody wrote about has no slide. If decision night needs to walk **every** booked candidate including the silent ones, that is a change to `findForSchedule`, not to the component.
+:::
+
+The view is **read-only**, and deliberately so. It is the same reasoning that keeps a pencil off eboard's view of someone else's note: a room full of people watching a judgement get rewritten is the worst possible moment for the attribution to go stale. Notes are edited from the interviewer's own page, before the meeting.
+
 ## Calendars
 
 A booked interview lands on the rushee's portal calendar and their [calendar subscription](./calendar-subscription.md). `interviewModel.findForCalendar` shapes rows like events (`title`, `description`, `location`, `startDate`, `endDate`) so both merges work without a second formatter.
