@@ -86,6 +86,9 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 | `about_me` | Free text, **truncated** to 600 rather than rejected |
 | `doing_now` | ≤150. What a member is doing after graduation. Only the alumni form renders it, but the rule applies to every caller — a check gated by group as well as by form disappears the moment somebody calls this route directly |
 | `links` | Up to **5** entries of `{ label, url }`. Label required, ≤40. URL validated as an href, ≤300, stored canonicalised. See below |
+| `minors` | ≤200. Minors and certificates, as one free-text line. Rush interest form |
+| `gpa` | A number with **at most two decimal places**, `0` to `5`. Rush interest form. See the warning below |
+| `heard_from` | ≤300. "How did you hear about KTP?", free text by decision rather than by omission — a fixed option list was considered and turned down. Rush interest form |
 
 Everything except `about_me` **rejects with a `400` naming the field** rather than being shortened or coerced: each of these is something a person is found or addressed by, so half of one is the wrong answer rather than a shorter right one. A blank string clears its column instead of being stored as `''`.
 
@@ -115,6 +118,20 @@ A scheme-less host like `example.com/me` is accepted and canonicalised to `https
 An empty string is `22007` and `2004-02-30` is `22008` — both abort the statement rather than storing a bad row, and the controller turns a thrown query into a `500`. The API now answers `400` instead.
 
 The value also stays a **string** all the way to Postgres. A JavaScript `Date` is serialised with the server's local offset, so a date-only value written that way lands a day early anywhere west of UTC: from a UTC-4 machine, `"2004-05-14"` stores `2004-05-14` and `new Date("2004-05-14")` stores `2004-05-13`.
+:::
+
+:::warning `gpa` is the only `NUMERIC` column here, and it is a **string** in JSON both ways
+`users.gpa` is `NUMERIC(3,2)`. **node-postgres returns `NUMERIC` as a string**, because a JS double cannot round-trip every `NUMERIC` — so this field arrives in every response as `"3.75"`, not `3.75`. The validator returns a string on the way in too, so the write and the read agree. Do not `parseFloat` it in a client: the export wants the exact stored digits.
+
+It is matched as **literal text** before being converted, the same way `validate.intId` works. `Number("3.5e0")`, `Number("+3.5")` and `Number(" 3.5 ")` all produce a number, so parsing first and inspecting afterwards would accept spellings nobody typed. A third decimal place is rejected rather than rounded — Postgres silently stores `3.756` as `3.76`, and a GPA that reads back differently from how it was entered is the kind of thing somebody notices on decision night.
+
+**The ceiling is 5, not 4.** A first-semester rushee has no college GPA and answers with a weighted secondary-school one. Refusing a true answer is a worse failure than a generous range.
+:::
+
+:::info The three rush fields are **rushee-only on the form, validated for everyone here**
+`minors`, `gpa` and `heard_from` are columns on every `users` row and only the *form* is gated — the same arrangement as `about_me` and `doing_now`. A column gated to one group would need migrating the day somebody changes group, which at this chapter happens every spring when a rushee becomes a pledge.
+
+The website's `buildProfilePayload` **omits all three keys** when the inputs are not rendered, rather than sending `null`. That is load-bearing and depends on the partial-write behaviour described above: without it, the first profile save a new pledge makes would write three nulls over the answers the pledge committee selected them on. The admin route cannot use the same trick — see [`PUT /admin/users/:id/profile`](#put-adminusersidprofile).
 :::
 
 **Response:** the saved profile row.
@@ -628,6 +645,44 @@ Any current member can view.
 ### `PUT /committees/:id/members/:userId/role`
 
 **Eboard only.** `{ "role": "chair" | "member" }` — auto-adds the target user as a committee member first if they aren't already one.
+
+### `PUT /committees/:id/rush-data-access`
+
+**Eboard only.** `{ "can_view_rush_data": true | false }` — designates this committee as one whose members may read the [rushee interest form data](#rushee-interest-form-data), GPAs included. This is how the pledge committee gets access. Responds with the updated committee.
+
+**Eboard, and deliberately not the chair of this committee**, which is the one place this differs from `loadAdministrable`. A chair able to set the flag on their own committee would be granting themselves the exact thing it gates. Same reasoning that keeps `setMemberRole` eboard-only.
+
+The value must be a real boolean. The string `"false"` is a `400` rather than being read as truthy — for an access flag, leniency in that direction grants access nobody asked for.
+
+More than one committee can carry the flag at once. Rush is co-run in some semesters, and the alternative would be eboard revoking one committee to grant another.
+
+`can_view_rush_data` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits.
+
+---
+
+## Rushee interest form data
+
+The questions the chapter used to collect in a Google Form, asked instead on the rushee's profile builder. `GET /rush-data` is the response sheet that replaces it.
+
+**This router is not under `/admin`**, and that is the whole point of it. `routes/admin.js` carries `requireGroup("eboard")` at the router level, and this surface is deliberately reachable by the pledge committee too — a committee is a Postgres row rather than an Authentik group, so no `requireGroup` call can express the rule. The router applies `requireAuth` plus a `SHARED_ALBUM_GROUPS` floor (**not** `RUSH_ACCESSIBLE_GROUPS` — a rushee must not reach an endpoint returning every other rushee's GPA), and the real decision happens in the controller. Same shape as `committeesController.loadAdministrable`.
+
+**The rule is eboard OR a member of any committee flagged with `can_view_rush_data`.** A union with no deny side. The eboard check runs first and short-circuits the query.
+
+### `GET /rush-data`
+
+Every rushee, with their interest form answers, ordered by surname.
+
+`403` rather than `404` for someone without the grant, and the message names who *can*. The existence of rushee data is not a secret to anyone who can see the Rushees tab in the directory; what is restricted is the answers.
+
+Excludes test accounts and deleted rows, like every other people-list. **Keeps rows whose `profile_complete` is false** — this is a funnel, and the rushee who signed up on Tuesday and stopped halfway is the one a chair needs to chase. Filtering them out would make the table disagree with the rushee count on the dashboard.
+
+The projection *is* the CSV export's column list, in the order the Google Form asked its questions, and `test/rushInterestData.test.js` pins its shape. Adding a column here means adding it to the export.
+
+### `GET /rush-data/access`
+
+`{ "can_view": true | false }` — answers `200` either way, so asking the question is never itself a failure.
+
+Its own endpoint rather than letting a client infer the answer from a `403`, for the same reason `GET /interviews/interviewer-schedules` backs the Interviews tab: a nav entry that appears and then `403`s is worse than no nav entry.
 
 ---
 
@@ -1250,7 +1305,9 @@ Returns `404` when the id is unknown **or** when the account was anonymized by a
 Unlike the member's own save, this route does not create a row, does not set `profile_complete`, and does not apply the alumni email guard. See the [ktp-api README](https://github.com/ktpuga/ktp-api#eboard-editing-another-members-profile) for why each of those matters.
 
 :::warning It sets the whole row
-Every field absent from the body is written as `NULL`. The admin UI seeds its form from `GET /admin/users`, which is why that endpoint returns `dob`, `phone`, `personal_email`, `linkedin_url` and `about_me` even though the list doesn't display them. A new editable column has to be added to `PROFILE_FIELDS`, `findAll` and `adminUpdateProfile` in the same change, or it will erase itself the first time eboard saves.
+Every field absent from the body is written as `NULL`. The admin UI seeds its form from `GET /admin/users`, which is why that endpoint returns `dob`, `phone`, `personal_email`, `linkedin_url`, `about_me`, `minors`, `gpa` and `heard_from` even though the list doesn't display them. A new editable column has to be added to `PROFILE_FIELDS`, `findAll` and `adminUpdateProfile` in the same change, or it will erase itself the first time eboard saves.
+
+**This route does *not* honour the "absent key is left alone" rule** that `PUT /users/me/profile` follows — it is a plain whole-row `UPDATE`, on purpose (see the three reasons in `userModel.adminUpdateProfile`). The consequence for the UI is concrete: `AdminEditProfileModal` renders `minors`, `gpa` and `heard_from` for **everyone**, not only rushees. Gating those inputs on `member_group === 'rush'` would mean eboard fixing a typo in a new pledge's surname silently erasing the GPA the pledge committee selected them on.
 :::
 
 ### `PUT /admin/users/:authentikId/username`

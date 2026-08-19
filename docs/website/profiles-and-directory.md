@@ -122,7 +122,7 @@ All of it lives in `lib/avatar.js` on the website. Two consequences worth knowin
 
 One component, `components/profile/ProfileForm.jsx`, serves both onboarding at `/complete-profile` and Settings; eboard's "edit anyone" modal (`components/admin/AdminEditProfileModal.jsx`) is a deliberate non-reuse of it, but posts the same payload through `lib/profile.js`'s `buildProfilePayload`. On the API side both land in the **same normalizer**, so the rules cannot drift apart on the route with more authority. The per-field rules are documented once, at [API: `PUT /users/me/profile`](../api/endpoints.md#put-usersmeprofile).
 
-Three of them are worth knowing here because the form is what produces the value:
+Four of them are worth knowing here because the form is what produces the value:
 
 - **The onboarding form does not ask for the UGA email; the Settings form does.** The Authentik enrollment prompt collects the address now and `POST /users/sync` seeds it onto the row at first login, so it is already on file before anyone reaches `/complete-profile`. The field stays on the Settings form so it remains correctable.
 
@@ -135,6 +135,7 @@ Three of them are worth knowing here because the form is what produces the value
 
 - **Graduation is a semester and a year**, not a date. The form composes it from a `Spring`/`Fall` dropdown and a **free-text** four-character year box, so `"Spring abcd"` is something the real UI can submit; the API rejects it. Nothing is lost by that strictness, because `parseGraduationDate` already discards a value it cannot split back apart, leaving the picker blank and clearing the column on the next save. The client and the server agree.
 - **Date of birth is sent as `YYYY-MM-DD`**, which `<input type="date">` produces and `normalizeUserProfile` trims the stored timestamp down to. A value in any other spelling is a 400.
+- **The three rush interest fields (`minors`, `gpa`, `heard_from`) render for rushees only**, and use the same `formData.has` mechanism as the UGA email above — for a different reason and with higher stakes. See [Rush Portal: the interest form](./rush-portal.md#the-interest-form). `AdminEditProfileModal` renders them for *everyone*, because the admin route is a whole-row `UPDATE` that does not honour absent keys; the two forms disagree on purpose.
 
 :::danger Never pass a semester string to `new Date()` — the NaN guard will not catch it
 Fixed 2026-08-12. `formatGraduationDate` in `lib/portal-format.js` used to call `new Date(value)` on the stored value and fall back to the raw string only if the result was `NaN`. It never was: V8's lenient legacy date parser ignores the word it does not recognise and keeps the year, so **`new Date('Fall 2027')` is 1 January 2027**, not an Invalid Date.

@@ -368,7 +368,13 @@ The caret position is returned by that same pure function and applied in an effe
 
 `/admin/interviews` → open a round → **Decision night**. One candidate per screen, projected: photo and identity on the left, every interviewer's notes on the right, arrow keys or space to advance, Esc to close. It replaces a Google Slides deck that was rebuilt by hand every round.
 
-It reads `GET /interviews/schedules/:id/notes`, which carries `candidate_name`, `profile_picture_asset_id`, `major` and `graduation_date` per candidate. Those last three ride on the **round-wide** read only — `findForCandidate`, the panel an interviewer opens mid-round, has no reason to carry profile data and does not.
+It reads `GET /interviews/schedules/:id/notes`, which carries `candidate_name`, `profile_picture_asset_id`, `major`, `graduation_date` and `gpa` per candidate. Those last four ride on the **round-wide** read only — `findForCandidate`, the panel an interviewer opens mid-round, has no reason to carry profile data and does not.
+
+`gpa` came from the [rushee interest form](./rush-portal.md#the-interest-form) and its split across those two reads *is* the access rule for the column. Decision night is where the chapter votes, so the number belongs on the slide; the panel an interviewer opens mid-interview does not need it and does not get it.
+
+That makes decision night a **wider** audience for a GPA than the Rushee Data table, which is eboard plus the pledge committee: this route is `manage`-gated, so every committee chair sees GPAs here. Deliberate — decision night is a room, not a permission.
+
+It renders as the string the API sent. `users.gpa` is `NUMERIC` and node-postgres reads `NUMERIC` back as text, so `"3.75"` arrives already formatted; a `toFixed` in the component would put `NaN` on a projector the first time a candidate left it blank.
 
 `graduation_date` is free text a member typed (`"Spring 2028"`), not a date. It is rendered as stored; nothing parses it.
 

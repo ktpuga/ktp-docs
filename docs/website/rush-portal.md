@@ -55,6 +55,71 @@ The poll create modal offers a **Rushees** pill, but `rush` is deliberately **no
 Fixed 2026-08-12. `PollsPage`'s `ROLES` array was declared inside the component, below code that read it, which put it in a temporal dead zone — the create modal threw `Cannot access 'ROLES' before initialization` on render. It is static data with no dependency on props or state, so it belongs at module scope where hoisting order cannot bite.
 :::
 
+## The interest form
+
+The chapter collected an interest form in Google Forms for years. It is now twelve questions on the **rushee's own profile builder** (`/rushee/settings`, and `/complete-profile` on first sign-in), so the answers hang off the account rather than living in a sheet nobody can link back to a person.
+
+Nine of the twelve already had columns. Three did not, and were added in migration `1788700000000`:
+
+| Column | Type | Question |
+|---|---|---|
+| `users.minors` | `TEXT` | "Minor(s) and Certificates?" |
+| `users.gpa` | `NUMERIC(3,2)` | "GPA" |
+| `users.heard_from` | `TEXT` | "How did you hear about KTP?" |
+
+"Your Major(s)" reuses `users.major` unchanged — the form has always collected it as prose ("Computer Science and Finance"), and a plural array would mean rewriting every directory card, the public roster and the decision-night slide to render a list where they render a string, for no answer the existing box cannot hold. Only the label changed.
+
+**"Timestamp" is `created_at`, not a question.** Google Forms stamps a submission; here the row already exists.
+
+### The fields are rushee-only on the form and universal in the column
+
+Same arrangement as `about_me` and `doing_now`: the columns are on every `users` row, the API validates them for every caller, and only `ProfileForm` decides who sees the inputs. A column gated to one group would need migrating the day somebody changes group, which at this chapter happens every spring.
+
+:::danger Do not render these inputs for everyone "so the payload is consistent"
+`buildProfilePayload` keys off `formData.has('gpa')` and **omits all three keys** when the inputs are absent, which tells `PUT /users/me/profile` to leave the stored values alone. That is the same `has`-not-`get` trick the UGA email field uses, and here it prevents real data loss: the day a rushee is given a pledge class the form stops rendering these fields, and without the omission their next unrelated profile save would write three nulls over the answers the pledge committee selected them on.
+
+`AdminEditProfileModal` is the exact opposite and for the opposite reason — `PUT /admin/users/:id/profile` is a whole-row `UPDATE` that does not honour absent keys, so that modal must render all three for **everyone**. The two forms disagree on purpose.
+:::
+
+### GPA is a string in JSON
+
+`NUMERIC` comes back from node-postgres as text, so `gpa` is `"3.75"` everywhere, never `3.75`. The validator returns a string on the way in too so the read and the write agree. A third decimal place is rejected rather than rounded, because Postgres silently stores `3.756` as `3.76`. The ceiling is **5**, not 4 — a first-semester rushee answers with a weighted secondary-school GPA.
+
+## Rushee Data: the table that replaced the response sheet
+
+One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pages:
+
+| Route | Audience |
+|---|---|
+| `/admin/rush-data` | Eboard |
+| `/member/rush-data` | The pledge committee |
+
+**Two routes rather than one, because no single route can serve both.** `proxy.ts` hard-gates `/admin` to the `eboard` group, and it redirects an eboard-only account *away* from `/member`. It also cannot help here at all: the rule involves committee membership, which lives in Postgres and deliberately never in the JWT, so the proxy has nothing to check.
+
+**Neither route is the access boundary.** Any member of the member portal can type `/member/rush-data`; the API answers `403` and the component renders the refusal. The nav entry is hidden by `useRushDataAccess`, which asks `GET /rush-data/access` — the same shape as the Interviews tab, so an entry cannot appear for someone the endpoint would then refuse.
+
+### How the pledge committee gets in
+
+`committees.can_view_rush_data`, a boolean eboard toggles from the committee's own detail page.
+
+A flag rather than a name match: committees are free-form rows, so "the pledge committee" is not something the schema knows, and `name LIKE '%pledge%'` would make the access rule a substring — renaming it to "New Member Education" would silently lock everyone out, and a second committee with "pledge" in its name would silently let them in.
+
+The toggle is **eboard-only, not the chair of that committee** — a chair who could set it on their own committee would be granting themselves the GPAs it gates. The flag rides on every committee shape so the card badges it for all members: an access grant nobody can see is one nobody audits.
+
+### The export
+
+An **Export CSV** button, built in the browser from data the page already fetched. Google Sheets imports it with File > Import; Excel opens it on double-click.
+
+It exports **what is on screen, filter included** — the search box is how somebody narrows to the people they are working on, and an export that ignored it would hand over the whole cohort under a filename saying otherwise.
+
+`lib/csv.js` is shared and handles three things that are easy to get wrong:
+
+- **A UTF-8 BOM.** Excel does not detect UTF-8 in a `.csv` and falls back to the system codepage, so without it every accented name opens mangled — and a name is exactly what nobody re-checks before mailing the sheet around.
+- **Formula injection.** A cell beginning `=`, `+`, `-`, `@` or a control character is executed on open by both Sheets and Excel. These values are typed by people outside the chapter into a sheet eboard opens, so `=IMPORTXML(...)` in a "how did you hear about KTP" box is a real exfiltration path. Each is prefixed with a single quote, which neither program displays. **The check runs before quoting** — wrapping in double quotes does not disarm a formula.
+- **CRLF and RFC 4180 quoting**, so a multi-major answer like `Computer Science, Finance` stays one cell instead of shifting every column after it.
+
+The table shows 8 of the 13 columns; submission date, preferred name, personal email, phone and date of birth are export-only, and the footer says so.
+
 ## Rush announcements are a separate table
 
 `rush_announcements`, not an audience value on `announcements`.
