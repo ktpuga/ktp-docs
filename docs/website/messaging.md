@@ -31,7 +31,7 @@ The one messaging mode that's **not** open to everyone by default: access is che
 - **Eboard-created**: eboard names a chat (e.g. "Rush Committee") and assigns specific members, editable any time after creation.
 - **Member-created**: any member except a rushee makes a chat for themselves. Private to the people they add, and administered by whoever made it. See [Member-created chats](#member-created-chats) below.
 - **Committee chats**: every [committee](./overview.md#committees) automatically gets its own linked group chat. Joining or leaving the committee joins/leaves its chat too — no separate step.
-- **The Eboard chat**: a singleton chat that every current eboard member is automatically in, reconciled on every login against the `eboard` Authentik group (self-healing — there's no explicit "join eboard" action to hook, unlike committees).
+- **The Eboard chat**: removed. See [below](#the-eboard-chat-was-removed).
 
 **Any member of a given chat** can post — this is a real multi-party thread, not a broadcast, so message bubbles show the sender's name (unlike DMs, where it's just "you" vs. "them").
 
@@ -53,7 +53,7 @@ Eboard reads **every official chapter chat**, whether or not they're a member �
 
 | Value | Meaning | Eboard sees it |
 |---|---|---|
-| `FALSE` | official chapter space — committee chats, audience chats, the Eboard chat | **yes**, always |
+| `FALSE` | official chapter space — committee chats, audience chats | **yes**, always |
 | `TRUE` | a private space between members | **no** — the way in is a report, not a permission |
 
 `POST /group-chats/member` is what sets it `TRUE`. `test/groupChatOversight.test.js` and `test/memberGroupChats.test.js` cover both halves of the rule.
@@ -80,7 +80,27 @@ Eboard oversight stops at group chats. Direct messages have no eboard view at al
 
 This replaced an "Add by group" control that expanded a group into individual rows. That was a snapshot — it captured who was in the group at that moment and never updated, which is the exact problem audiences exist to solve.
 
-The **Eboard chat is excluded** (409). Its membership is already reconciled from the `eboard` Authentik group on every login, so an audience would be a second, competing source of truth for the same question.
+## The Eboard chat was removed
+
+Removed 2026-08-20 (migration `1788800000000`, which drops `group_chats.is_eboard_chat`). It predated audiences, and audiences do the job properly.
+
+The old mechanism ran `syncEboardChatMembership` on every login: it looked for the one chat flagged `is_eboard_chat`, created it if absent, then added or removed **the person signing in**. Three symptoms, all the same bug seen from different angles:
+
+1. **Deleting it did not stick.** With the row gone the lookup found nothing, so the next eboard login recreated it. The chapter deleted it repeatedly and it kept returning.
+2. **It never contained all of eboard.** Membership accrued one person at a time on their own login, so anyone who had not signed in since the chat was created was silently absent — which is the opposite of what an "everyone in eboard" chat promises.
+3. **It could not be given an audience or left.** Two special cases answered 409 to stop a second source of truth fighting the reconciliation.
+
+An `audience` of `['eboard']` replaces all of it: membership is evaluated at **read** time, so it is correct for everyone at once and updates the moment somebody joins or leaves the group.
+
+:::note The existing chat was NOT deleted
+The migration drops the column, not the row. That is deliberate — a migration should not destroy a chat's message history to tidy up a flag. The chat becomes an ordinary group chat: it can now be renamed, given an audience, left or deleted like any other, and **nothing recreates it**. Delete it and it stays deleted, or keep the history and set its audience to eboard.
+:::
+
+:::warning Rolling back does not restore which chat was flagged
+The down migration re-adds the column, but the value is gone the moment the column drops, so every chat comes back unflagged. That is the safe direction: the worst case is an ordinary chat named "Eboard", rather than a re-armed singleton fighting an audience somebody has since set.
+:::
+
+There is no longer an Eboard-chat exception here. That chat used to answer 409, because its membership was reconciled on every login and an audience would have been a second, competing source of truth. The automation is gone, so an eboard chat is now given `audience = ['eboard']` like any other.
 
 :::note The roster must refetch when the audience changes
 Membership is derived, so the member list in the UI keys on the audience as well as the chat id. Keying on the chat id alone left the old roster on screen until you closed and reopened the chat, which reads as "saving didn't work".
@@ -120,7 +140,7 @@ Renaming a chat, deleting it, changing its photo, and adding or removing members
 
 Creating an official chat confers nothing afterwards, or any member who once made a committee chat would keep power over it.
 
-**Renaming** is the pencil beside the chat's name in the info modal, and it works on every chat type including committee chats and the Eboard chat. Neither of those has a name that gets re-derived later, so nothing overwrites a hand-set one. If committee renaming is ever built, that's the moment to decide whether it repoints its chat's name.
+**Renaming** is the pencil beside the chat's name in the info modal, and it works on every chat type including committee chats. A committee chat's name is not re-derived later, so nothing overwrites a hand-set one. If committee renaming is ever built, that's the moment to decide whether it repoints its chat's name.
 
 :::warning This was a real hole, closed with the feature
 Those five routes used to be `requireGroup("eboard")` and never consulted `is_member_created`, so **eboard could delete or repopulate a member chat they were forbidden to read** — a larger power than the read they'd been denied. A router-level group check can't express "unless a member made it" because the answer depends on the row, so the check moved into `groupChatsController.loadAdministrable` and those routes now carry no `requireGroup` at all.
@@ -138,7 +158,7 @@ A member's chat takes an explicit member list only. `audience` and `committee_id
 |---|---|
 | You're in via the audience or a committee | No row to delete, so it would report success and leave you in the chat |
 | You created the chat | Nobody else could administer it afterwards. Delete it instead |
-| The Eboard chat | Reconciled from Authentik on every login, so it would undo itself |
+
 | You're viewing through eboard oversight | You aren't in the chat to begin with |
 
 ### The report escape hatch

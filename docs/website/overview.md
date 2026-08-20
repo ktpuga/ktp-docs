@@ -64,7 +64,7 @@ A pending request is stored separately from membership on purpose — putting it
 :::
 - **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
 - **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
-- **Messages** — direct messages and group chats, including auto-managed committee chats and the eboard chat ([Messaging](./messaging.md))
+- **Messages** — direct messages and group chats, including auto-managed committee chats ([Messaging](./messaging.md))
 - **Directory** — browse members, view a profile, start a conversation, request a meeting. One tab per member group (E-Board, Chairs, Members, Pledges, Alumni, and Rushees during rush). Available in `/member`, `/pledge` and, since 2026-08-11, `/admin` ([Profiles & Directory](./profiles-and-directory.md))
 - **Meetings** — request time with a member or a group; they accept or decline, and it lands on both calendars ([Meetings](./meetings.md))
 - **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))

@@ -131,7 +131,7 @@ It is matched as **literal text** before being converted, the same way `validate
 :::info The three rush fields are **rushee-only on the form, validated for everyone here**
 `minors`, `gpa` and `heard_from` are columns on every `users` row and only the *form* is gated — the same arrangement as `about_me` and `doing_now`. A column gated to one group would need migrating the day somebody changes group, which at this chapter happens every spring when a rushee becomes a pledge.
 
-The website's `buildProfilePayload` **omits all three keys** when the inputs are not rendered, rather than sending `null`. That is load-bearing and depends on the partial-write behaviour described above: without it, the first profile save a new pledge makes would write three nulls over the answers the pledge committee selected them on. The admin route cannot use the same trick — see [`PUT /admin/users/:id/profile`](#put-adminusersidprofile).
+The website's `buildProfilePayload` **omits all three keys** when the inputs are not rendered, rather than sending `null`. That is load-bearing and depends on the partial-write behaviour described above: without it, the first profile save a new pledge makes would write three nulls over the answers the pledge committee selected them on. The admin route cannot use the same trick — see [`PUT /admin/users/:authentikId/profile`](#put-adminusersauthentikidprofile).
 :::
 
 **Response:** the saved profile row.
@@ -1169,7 +1169,7 @@ The allowed groups are a *positive* list (`eboard`, `chair`, `active`, `alumni`,
 
 **Administrator only** (see the note below). Renames the chat. `{ "name": "..." }` — **400** on a blank or whitespace-only name, which leaves the old name in place.
 
-Works on every chat type, committee chats and the Eboard chat included. Neither has a name that gets re-derived later: a committee chat is named once at creation and there is no committee update function anywhere, and the Eboard chat is looked up by `is_eboard_chat`, never by name.
+Works on every chat type, committee chats included. A committee chat's name is not re-derived later: it is named once at creation and there is no committee update function anywhere.
 
 ### `DELETE /group-chats/:id`
 
@@ -1179,7 +1179,7 @@ Works on every chat type, committee chats and the Eboard chat included. Neither 
 
 Removes **the caller** from the chat. The one roster change that needs no administration right, which is why it isn't `DELETE /:id/members/me` — that path would be matched by the `:userId` route and inherit its check.
 
-**409** if you're in the chat via its audience or a committee (there'd be no row to delete, so it would report success and change nothing), if you created a member chat (nobody else could administer it afterwards — delete it instead), or for the Eboard chat (login reconciliation would undo it). **403** if you aren't in the chat.
+**409** if you're in the chat via its audience or a committee (there'd be no row to delete, so it would report success and change nothing), or if you created a member chat (nobody else could administer it afterwards — delete it instead). **403** if you aren't in the chat.
 
 ### `GET /group-chats/:id/messages`
 
@@ -1241,7 +1241,9 @@ This covers `PATCH /:id`, `DELETE /:id`, `PUT /:id/photo`, `PATCH /:id/audience`
 :::
 
 :::note Two chats are managed automatically
-Every committee gets a linked group chat whose membership tracks committee membership. There's also a singleton eboard chat, re-synced against the `eboard` Authentik group on every login. Neither should be managed by hand.
+Every committee gets a linked group chat whose membership tracks committee membership; it should not be managed by hand.
+
+There used to be a singleton Eboard chat re-synced on every login. **It was removed in migration `1788800000000`** — see [Messaging](../website/messaging.md#the-eboard-chat-was-removed).
 :::
 
 ---
