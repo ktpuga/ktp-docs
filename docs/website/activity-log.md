@@ -4,7 +4,7 @@ sidebar_position: 12
 
 # Activity Log
 
-Every state-changing request across the site, readable by eboard at **`/admin/logs`**. Answers "who deleted that?" — the question that only ever gets asked about the action nobody anticipated.
+Every state-changing request across the site, readable by eboard on the **Activity Log** tab of **`/admin/oversight`**. Answers "who deleted that?" — the question that only ever gets asked about the action nobody anticipated.
 
 ## Written by middleware, not by controllers
 

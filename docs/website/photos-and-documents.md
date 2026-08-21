@@ -199,7 +199,7 @@ Without `TEST_DATABASE_URL` they skip, so plain `npm test` still works with no D
 
 ## Public homepage gallery
 
-A completely separate system from the two above — the "Chapter Gallery" section shown on the actual public homepage, visible to anyone with no login. Managed at `/admin/homepage-photos` (eboard only):
+A completely separate system from the two above — the "Chapter Gallery" section shown on the actual public homepage, visible to anyone with no login. Managed on the **Website** tab of `/admin/homepage-media` (eboard only):
 
 - Upload a file directly, **or** register an already-uploaded Immich asset by pasting its asset id (for cases where someone — e.g. the SWE committee — uploaded straight into the Immich UI). Registering by id validates the asset actually exists before saving, to avoid a typo'd id causing a broken image.
 - Reorder photos via up/down buttons (`display_order`).
@@ -233,10 +233,10 @@ Nothing was lost when this shipped: the migration filed every existing photo int
 
 ## iOS homepage slideshow
 
-A fourth, separate system — the slideshow on the **iOS app's** home screen, managed at `/admin/ios-homepage-slideshow` (eboard only).
+A fourth, separate system — the slideshow on the **iOS app's** home screen, managed on the **iOS App** tab of `/admin/homepage-media` (eboard only).
 
 :::caution Not the same as the public homepage gallery
-The gallery above is the website's public marketing page and needs no login. This one is in-app and requires authentication. They have separate tables, separate endpoints (`/homepage-photos` vs. `/ios-homepage-photos`), and separate admin pages. The similar names make them easy to confuse.
+The gallery above is the website's public marketing page and needs no login. This one is in-app and requires authentication. They have separate tables and separate endpoints (`/homepage-photos` vs. `/ios-homepage-photos`). Since the nav consolidation they share one admin page, as two tabs — which makes the similar names easier to confuse, not harder, so check which tab you are on.
 :::
 
 Each slide carries a title, alt text, and optionally a subtitle and a link (HTTPS only) with a label. Slides can be **scheduled** with `starts_at`/`ends_at` and toggled active — a slide only shows in the app when it's active and inside its window.

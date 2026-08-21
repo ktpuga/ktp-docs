@@ -91,7 +91,7 @@ One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pag
 
 | Route | Audience |
 |---|---|
-| `/admin/rush-data` | Eboard |
+| `/admin/rushees` (Rushee Data tab) | Eboard |
 | `/member/rush-data` | The pledge committee |
 
 **Two routes rather than one, because no single route can serve both.** `proxy.ts` hard-gates `/admin` to the `eboard` group, and it redirects an eboard-only account *away* from `/member`. It also cannot help here at all: the rule involves committee membership, which lives in Postgres and deliberately never in the JWT, so the proxy has nothing to check.
