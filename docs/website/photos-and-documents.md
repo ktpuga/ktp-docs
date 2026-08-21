@@ -205,6 +205,28 @@ A completely separate system from the two above — the "Chapter Gallery" sectio
 - Reorder photos via up/down buttons (`display_order`).
 - Removing a photo only unlists it from the gallery — it does not delete the underlying Immich asset, since that asset might be reused elsewhere.
 
+### The hero collage rotates from the gallery
+
+The six photos in the collage at the very top of the homepage are **not hardcoded any more**. They are a rotating slice of the **first featured collection** — the same album the "Life at Phi Chapter." section renders further down, so the two never disagree about which album is current.
+
+- The set changes **every 4 hours**, on a wall-clock boundary, so everyone looking during the same block sees the same six.
+- It is a **sliding window**, not a shuffle: the window advances by six each block, so consecutive blocks show a fresh set and every photo in the album eventually gets its turn.
+- Picked on the **server** (`lib/hero-photos.js`, called from `app/page.js`) and passed down as a prop, so the collage is right on the first paint rather than swapping a moment after load.
+
+Three things make it safe on a page that has to render for anonymous visitors:
+
+| Guard | Why |
+|---|---|
+| 1.5s fetch timeout | A slow or unreachable ktp-api must not hang the public landing page. |
+| Falls back to six bundled images | Any failure — timeout, bad JSON, no API URL — renders the original hardcoded collage. An out-of-date hero beats an empty one. |
+| Album needs **at least 6** usable photos | `heroPhotoPositions` is a fixed six-slot arrangement; a shorter album would leave visible holes, so a short one is skipped and the next featured collection is tried. |
+
+Videos are filtered out — a collection may contain them, and the collage renders `<Image>`.
+
+:::caution These are the only homepage images Next.js optimizes
+The media endpoint streams the **original** asset with no thumbnail variant. That is tolerable further down the page, but the hero is the first thing that paints, so those six are deliberately **not** `unoptimized` — Next resizes and re-encodes them to the displayed size. Do not "make it consistent" by adding `unoptimized` back.
+:::
+
 ### Collections
 
 Photos are grouped into named **collections**, so eboard can run several galleries side by side ("Spring Formal 2026", "Hackathon Fall 2025") instead of one flat list everything piles into. The manager shows them as a bar of pills; picking one scopes the grid, the reordering, the bulk actions and any new uploads to that collection.
