@@ -174,19 +174,25 @@ The headline numbers barely move, and that is fine — **the three that mattered
 
 Judge this by which advisories are left, not how many.
 
+:::note Partly superseded in August 2026
+The vendored `npm` tree named above was **not** dev-only. It came from `react-multi-carousel`, an unused *production* dependency whose upstream manifest declares `npm@^10.1.0`, and it carried the critical `tar` advisory into the shipped tree. It was removed in the August 2026 cleanup along with `yarn.lock` and `bun.lock`. The counts on this page are the August 3 snapshot, kept as a historical record — see [Dependency security](./dependency-security.md) for the current picture.
+:::
+
 ## If you need to roll back
 
-`package.json` alone is not enough — the lockfile retains the resolved tree. This repo carries **three** lockfiles (`package-lock.json`, `yarn.lock`, `bun.lock`), and adding a dependency has to touch all of them or they drift: PR #42 added `auto-skeleton-react` to `package.json` and `package-lock.json` but not to `yarn.lock`, and nothing caught it because production reads none of them (see the warning below). Restore all three together:
+`package.json` alone is not enough — the lockfile retains the resolved tree. Restore both together:
 
 ```bash
-git checkout -- package.json package-lock.json yarn.lock bun.lock
+git checkout -- package.json package-lock.json
 rm -rf node_modules .next
 npm install --legacy-peer-deps
 ```
 
+This repo used to carry **three** lockfiles, and adding a dependency had to touch all of them or they drifted: PR #42 added `auto-skeleton-react` to `package.json` and `package-lock.json` but not to `yarn.lock`, and nothing caught it because production reads none of them (see the warning below). `yarn.lock` and `bun.lock` were deleted in August 2026; `package-lock.json` is now the only lockfile.
+
 Budget several minutes for the install. And note that **`npm audit fix` cannot run on this repo at all** — `lucide-react@0.344.0` declares a peer of React 16/17/18 against our React 19, so npm `ERESOLVE`s. Always use `npm install --legacy-peer-deps` locally.
 
-:::warning Production does not use any of the three lockfiles
+:::warning Production does not use the lockfile
 This page previously said the Dockerfile uses `bun install`. It does not, and hasn't for some time — `Dockerfile` line 8 is `npm install --legacy-peer-deps`, the same command you run locally. It hits the same peer conflict and resolves it the same way.
 
 More importantly, the deps stage is `COPY package.json ./` **only**. No lockfile is copied into the image, so a production build resolves the whole tree fresh from the semver ranges in `package.json` every time. Consequences worth holding on to:
