@@ -85,6 +85,7 @@ The `member_group` is determined by group priority: `eboard > chair > active > p
 | `pledge_class` | ≤50 |
 | `about_me` | Free text, **truncated** to 600 rather than rejected |
 | `doing_now` | ≤150. What a member is doing after graduation. Only the alumni form renders it, but the rule applies to every caller — a check gated by group as well as by form disappears the moment somebody calls this route directly |
+| `pronouns` | ≤40. Member-set pronouns. Free text, and deliberately **not** validated against the preset list the clients show — those presets are a convenience, and the Custom option beside them only means anything if an unlisted value is accepted. Rejects rather than truncates |
 | `links` | Up to **5** entries of `{ label, url }`. Label required, ≤40. URL validated as an href, ≤300, stored canonicalised. See below |
 | `minors` | ≤200. Minors and certificates, as one free-text line. Rush interest form |
 | `gpa` | A number with **at most two decimal places**, `0` to `5`. Rush interest form. See the warning below |

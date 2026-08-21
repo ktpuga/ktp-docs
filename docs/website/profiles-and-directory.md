@@ -57,6 +57,26 @@ A link that fails validation renders as **no chip**, rather than a dead or hosti
 
 A link with a label but no address, or an address with no label, is rejected with a message naming the row. An empty row you added and never filled in is simply dropped, so clicking "Add a link" and changing your mind never fails the save.
 
+## Pronouns
+
+Optional, set by the member on their own profile form. A dropdown of common presets — he/him, she/her, they/them, he/they, she/they — plus **Custom…**, which reveals a free-text box.
+
+The presets are a **convenience, not a vocabulary**. The column is plain `TEXT` and the API validates only the length (≤40), so the Custom box is a real escape hatch rather than a sixth preset. Nothing checks the value against the list, deliberately: a list of pronouns is never complete, and an enum would need a migration per person to fix that.
+
+Choosing nothing stores `NULL`, which is *unanswered* rather than an answer. The directory renders nothing at all for it — not an empty pill, and not "prefer not to say" as though it were a stated position.
+
+:::caution Member portal only, and the public roster must stay that way
+Pronouns appear on the directory card and the profile modal, both behind login. They are **not** on the public `/members-list` roster.
+
+That is enforced by the SELECT lists in `models/memberModel.js` — `findPublicRoster` and `findPublicRosterMember` do not name the column — and by nothing else. `/members-list` is unauthenticated and search-indexable, and somebody can be out inside the chapter without being out on a public web page.
+
+`test/pronouns.test.js` asserts both directions against the real model source: absent from the two public queries, present in the two portal ones. If that call is ever reversed, reverse it deliberately rather than letting it arrive with a `u.*`.
+:::
+
+### Eboard's edit modal renders the field because it must
+
+`components/profile/PronounsField.jsx` is shared by the member's own form and eboard's `AdminEditProfileModal`, for the same reason `LinksField` is: the admin write is **whole-row**, and both forms build their body with the shared `buildProfilePayload`. A modal that rendered no pronouns input would still send `pronouns: null` and blank the member's answer every time eboard corrected their major — which is exactly the bug `links` once had.
+
 ## Traits
 
 Eboard can type up to six short **captions** onto any member: *Pledge Chair*, *Fintech*, *Atlanta, GA*. Each is one plain string, up to 80 characters.
