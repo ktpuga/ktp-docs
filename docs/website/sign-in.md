@@ -32,37 +32,70 @@ A browser holds **two** sessions, not one:
 | | Set by | Cleared by |
 |---|---|---|
 | **Ours** — the NextAuth JWT cookie | completing sign-in on the site | `signOut()`, or 30 days |
-| **Authentik's** — its own SSO cookie | signing in *or enrolling* at `auth.ugaktp.com` | RP-initiated logout (`logoutEverywhere`) — **only if the provider's Invalidation flow is the right one**, see below |
+| **Authentik's** — its own SSO cookie | signing in *or enrolling* at `auth.ugaktp.com` | `logoutEverywhere` — but **only the provider's Invalidation flow decides whether that works**, see below |
 
 :::danger "Sign out" signs you out of the website, not Authentik
 Reported and diagnosed 2026-08-09. This is the enabler for everything else on this page, including [rush enrollment renaming an existing account](../authentik/enrollment.md).
 
-The URL is not the problem. `${AUTHENTIK_ISSUER}end-session/` matches the `end_session_endpoint` in Authentik's discovery document exactly — verified against the live server. What the endpoint *does* is decided by the OAuth2 provider's **Invalidation flow**, and Authentik ships two with confusingly similar names:
+The URL is not the problem. `${AUTHENTIK_ISSUER}end-session/` matches the `end_session_endpoint` in Authentik's discovery document exactly — verified against the live server. What the endpoint *does* is decided **entirely** by which stages the OAuth2 provider's **Invalidation flow** contains, and Authentik ships two with confusingly similar names:
 
-| Flow | What it ends |
-|---|---|
-| `default-provider-invalidation-flow` | the **application** session only — the authentik SSO session survives |
-| `default-invalidation-flow` | runs a `user_logout` stage: really signs out of authentik. This instance's brand default (`/flows/-/default/invalidation/` redirects to it) |
+| Flow | Stages it contains | SSO session | Where the browser ends up |
+|---|---|---|---|
+| `default-provider-invalidation-flow` | **none** — the blueprint creates a flow with no stage bindings at all | **survives** | authentik's "You've logged out of…" page |
+| `default-invalidation-flow` | one `user_logout` stage. This instance's brand default (`/flows/-/default/invalidation/` redirects to it) | ends | authentik's own app library |
+| `ktpapp-invalidation` | `user_logout` **+ a Redirect stage** | ends | `https://ugaktp.com/` |
 
-New OAuth2 providers default to the **provider-scoped** one. It is a trap because logout still looks like it worked: `post_logout_redirect_uri` is honoured and the browser lands back on `/login` reading "You've been signed out."
+New OAuth2 providers default to the **provider-scoped** one. It is a trap because logout still looks like it worked — nothing in the URL says the SSO session survived.
 
-**Fix: Providers → ktpapp → Invalidation flow → `default-invalidation-flow`.**
+`EndSessionView` always appends a `SessionEndStage` of its own after the flow's stages. That stage is why `default-invalidation-flow` alone strands people: by the time it runs the `user_logout` stage has already signed them out, so it sees an unauthenticated user and redirects to authentik's root. Signed out correctly, delivered to the wrong place.
+
+**Fix: Providers → ktpapp → Invalidation flow → `ktpapp-invalidation`** (built 2026-08-23; see [Building the ktpapp-invalidation flow](#building-the-ktpapp-invalidation-flow) below).
 
 **Verify:** sign out, then open `https://auth.ugaktp.com/` directly. Still signed in ⇒ not fixed. Nothing on our side can detect this — a `refresh_token` is not tied to the browser session — so it will not surface as an error anywhere.
 :::
 
-:::warning Where sign-out lands is an Authentik allow-list, not just our code
-`logoutEverywhere` asks Authentik to return the browser to `${AUTH_URL}/` — the homepage. Authentik honours that **only if the URI matches an entry in the provider's Redirect URIs list exactly**, trailing slash included; it uses that same list for post-logout redirects. A URI that isn't on the list is silently ignored and the person is left parked on `auth.ugaktp.com`.
+:::warning `post_logout_redirect_uri` does nothing. Corrected 2026-08-23
+**authentik 2026.2 ignores it.** `EndSessionView.get()` (`authentik/providers/oauth2/views/end_session.py`) plans the provider's invalidation flow, appends a `SessionEndStage` and redirects. It reads **no query parameters at all** — not `post_logout_redirect_uri`, not `id_token_hint`. `logoutEverywhere` still sends both because that is what the OIDC spec says an RP sends, not because anything acts on them.
 
-So the string in `lib/auth-actions.js` and the list in **Applications → Providers → ktpapp → Redirect URIs** are one setting in two places. Change one, change the other:
+Two corollaries, both of which have already cost debugging time here:
 
-| Environment | Entry to add (Strict) |
-|---|---|
-| Production | `https://ugaktp.com/` |
-| Local dev | `http://localhost:3000/` |
+- **The Redirect URIs allow-list is not involved in logout.** `https://ugaktp.com/` has been on it since 2026-08-16 and was never why sign-out landed wrongly. Probe it rather than reasoning about it — this is still the right technique, it just answers a different question (sign-**in** callbacks):
 
-This is also why the "just signed out" marker is a **cookie** and not a `?signedout=1` query param — the param would have to be allow-listed too, and getting it wrong doesn't degrade gracefully, it strands people on the IdP.
+  ```bash
+  curl -s -o /dev/null -w "%{http_code}" \
+    "https://auth.ugaktp.com/application/o/authorize/?client_id=<id>&response_type=code&scope=openid&prompt=none&redirect_uri=<urlencoded>&state=probe"
+  ```
+
+  **302 = registered** (the `error=login_required` in the `Location` is the correct answer for "no session"); **400 = not registered**.
+- **`?next=https://ugaktp.com/` does not work either.** The flow executor refuses any `next` carrying a hostname: `_flow_done()` runs it through `is_url_absolute()` and answers *"Invalid next URL"*. Only same-origin paths pass.
+
+The only mechanism that can send the browser back off the IdP is a **Redirect stage** inside the invalidation flow, whose `target_static` is not validated at all.
+
+This is also why the "just signed out" marker is a **cookie** and not a `?signedout=1` query param: Authentik discards our query string, and the trip home is issued by a stage inside the flow, so nothing we put on the outbound URL survives the round trip.
 :::
+
+### Building the `ktpapp-invalidation` flow
+
+One new stage, one new flow, two stage bindings and one provider setting, all in the Authentik admin UI. The `user_logout` stage already exists — reuse it, do not create a second one.
+
+1. **Flows and Stages → Stages → Create → Redirect Stage**
+   - Name: `ktpapp-invalidation-redirect`
+   - Mode: **Static**
+   - Target (static): `https://ugaktp.com/`
+2. **Flows and Stages → Flows → Create**
+   - Name: `KTP website logout` · Title: `Signing you out…` · Slug: `ktpapp-invalidation`
+   - Designation: **Invalidation**
+   - Authentication: **No requirement** (what the shipped invalidation flows use; the `user_logout` stage signs the person out mid-flow, so anything stricter is asking for trouble)
+3. **Open the new flow → Stage Bindings → Bind existing stage**
+   - Order **0**: `default-invalidation-logout` (the existing `user_logout` stage)
+   - Order **10**: `ktpapp-invalidation-redirect`
+4. **Applications → Providers → `ktpapp` → Edit → Invalidation flow → `ktpapp-invalidation` → Update**
+
+Order matters and is not interchangeable. `user_logout` must run first: it flushes the Django session and hands control on via `stage_ok()`, which re-saves the flow plan into the fresh session, so the Redirect stage that follows still executes. Put the redirect first and the browser leaves before anyone is signed out of anything.
+
+The appended `SessionEndStage` never runs here, because the Redirect stage has already sent the browser to ugaktp.com. That is the intended outcome, not a leak.
+
+**Why a flow of our own rather than editing `default-invalidation-flow`:** that one is the brand default. Adding the redirect there would send *every* logout in Authentik to ugaktp.com, including signing out of Authentik itself and any application added later.
 
 ### Three Authentik settings with "logout" in the name
 
@@ -70,16 +103,20 @@ They are unrelated to each other, and two of them are easy to reach for when the
 
 | Setting | Decides | Ours must be |
 |---|---|---|
-| **Invalidation flow** (on the provider) | whether Authentik's own SSO session actually ends | `default-invalidation-flow` — the provider-scoped one ends only the app session |
-| **Redirect URIs** (on the provider) | where the browser lands afterwards; the same list gates `post_logout_redirect_uri` | must include `https://ugaktp.com/` **as its own entry** — the OAuth callback URLs already there do not cover it under Strict matching |
+| **Invalidation flow** (on the provider) | whether the SSO session ends **and** where the browser lands | `ktpapp-invalidation` — both other flows get one of the two halves wrong |
+| **Redirect URIs** (on the provider) | sign-**in** callbacks only. It does **not** gate `post_logout_redirect_uri`, which authentik never reads | `https://ugaktp.com/` is on it and can stay; it is simply not part of logout |
 | **Backchannel logout URI** | a server-to-server `POST` of a signed `logout_token` from Authentik to the app | **blank** |
 
 The last one is the trap: its help text reads *"Required for OpenID Connect Logout functionality"*, which sounds mandatory. It refers to **backchannel** logout, a different half of the spec from the **RP-initiated** logout we use (browser → `end_session_endpoint` with `id_token_hint` → redirect). Ours needs no backchannel URI, and there is no endpoint in the website that could receive one — pointing it at the homepage just makes Authentik POST logout tokens at a page that answers 405.
 
 Implementing it later would be poor value: backchannel logout exists for apps holding revocable server-side sessions, and ours are stateless JWT cookies. Honouring a logout token would mean a revocation denylist checked on every request, for a case `logoutEverywhere` already covers from the browser.
 
-:::note No `id_token_hint`, no logout
-`logoutEverywhere` skips the round trip entirely when it has no id_token, because end-session without a hint answers `302 → /if/flow/default-authentication-flow/` — the **login** flow. Authentik can't tell whose session to end, so it asks the visitor to sign in first. Following that lands someone who pressed "sign out" on a login form, still signed in, having achieved nothing.
+:::note No id_token, no round trip
+`logoutEverywhere` goes straight home when it has no id_token. The guard is right, but the reason recorded here until 2026-08-23 was wrong.
+
+end-session is a `PolicyAccessView`, so **reaching it without an Authentik session cookie** answers `302 → /if/flow/default-authentication-flow/?…&next=…/end-session/` — the **login** flow, landing someone who pressed "sign out" on a sign-in form. That bounce is about the missing session cookie, not a missing hint: re-probed 2026-08-23, curl gets it identically with and without `id_token_hint`, because authentik reads the hint nowhere.
+
+The guard survives the correction because a missing id_token is decent evidence our session was already half gone and Authentik's has lapsed with it — exactly the case where the round trip strands people. Going straight home is no worse for the SSO session.
 :::
 
 Nothing keeps them in step, and there is no cheap way to notice when they disagree. A `refresh_token` is not tied to the browser session, so ours goes on renewing itself perfectly happily while Authentik's belongs to somebody else entirely.
