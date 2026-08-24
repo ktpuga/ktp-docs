@@ -52,24 +52,12 @@ After completing their profile, they'll be taken directly to their portal.
 
 ## Removing a Member
 
-Removing a member requires two steps: deleting them from Authentik, then removing their record from the database.
-
-### Step 1 — Delete from Authentik
-
 1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
 2. Navigate to **Directory → Users**
 3. Find the member and click their name
 4. Click **Delete** and confirm
 
-### Step 2 — Remove from Database
-
-After deleting from Authentik, contact Tech Dev to run the following on the database server:
-
-```sql
-DELETE FROM users WHERE username = 'their_username';
-```
-
-> **Why two steps?** The automatic cleanup (webhook) is not fully working yet. Until it is, the database row must be deleted manually. If this step is skipped, the username may block a future member from registering.
+That's it — a webhook automatically removes their row from the website's database within moments, no manual database step needed. (If a deleted member still shows up in the Directory or admin panel after a few minutes, the webhook may be broken — see [API: Webhooks](../api/endpoints.md#post-webhooksauthentik) for how to diagnose it, and contact Tech Dev.)
 
 ---
 
@@ -87,13 +75,23 @@ DELETE FROM users WHERE username = 'their_username';
 
 For example, moving a pledge to active after initiation, or a member to alumni after graduation.
 
+**Preferred method — from the website (eboard only):**
+
+1. Log into [ugaktp.com/admin/users](https://ugaktp.com/admin/users)
+2. Find the member and use the group dropdown on their row
+3. Pick the new group
+
+This takes effect **immediately** — no need for the member to log out and back in. It calls Authentik directly to make the actual change there (Authentik stays the source of truth), then updates the website's own records right away.
+
+**Fallback method — directly in Authentik** (if the website method is unavailable):
+
 1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
 2. Navigate to **Directory → Users**
 3. Find the member and click their name
 4. Go to the **Groups** tab
 5. Remove the old group and add the new one
 
-The change takes effect the next time they log in. The website will automatically route them to the correct portal.
+This way, the change only takes effect the next time the member logs in (the website re-syncs their group on every login) — not immediately.
 
 ---
 

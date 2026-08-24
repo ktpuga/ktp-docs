@@ -75,31 +75,36 @@ This mapping must be added to the **KTP OIDC provider's selected Property Mappin
 
 ---
 
-## Webhook (User Deletion)
+## API Tokens / Service Accounts
 
-A notification transport is configured to call the API when a user is deleted in Authentik.
+Used when ktp-api needs to call Authentik's own REST API directly, rather than just verifying tokens Authentik issued — currently only for the eboard "change member group" admin action (`services/authentikAdmin.js`, see [API: Eboard — changing a member's group](../api/overview.md#eboard-changing-a-members-group)).
 
-**Transport URL (internal):** `http://10.0.0.53:4000/webhooks/authentik`  
-**Trigger:** Event Matcher Policy — Action: `Model Deleted`, Model: `authentik_core.user`, App field: blank
+Authentik tokens are always bound to a single Identity (a User) — there's no way to create a token "for a group" directly. The pattern used here:
 
-> **Known issue:** The `X-Authentik-Token` header is not being transmitted by the Authentik transport regardless of configuration format tried. Webhook auth verification is disabled for now. When a user is deleted in Authentik, also manually delete their row:
-> ```sql
-> DELETE FROM users WHERE username = 'username';
-> ```
+1. **Directory → Users → Create Service Account** — creates a dedicated non-person user (`ktp-api-service`) and generates an API token in the same flow (shown once, copy it immediately). Using a dedicated service account rather than binding the token to a real person's account means it doesn't break if that person is demoted or leaves.
+2. **Directory → Groups → Create** a group (e.g. also named `ktp-api-service`) and add the service account user to it as a member.
+3. **Directory → Roles → Create** a Role (e.g. `ktp-api-group-manager`), then assign it to that group.
+4. Grant the Role permissions:
+   - **Object-level**, on each of the five role groups individually (`eboard`/`chair`/`active`/`alumni`/`pledge` — go to each group's own Permissions tab → "Assign object permissions to role"): `Add user to group`, `Remove user from group`, `Can view Group`. Scoping this per-object (not globally) means the token can only ever touch these five specific groups, not every group in the instance.
+   - **Global**, on the Role's own "Assigned global permissions" tab (not "Initial Permissions" — that's a different feature, for auto-granting permissions on objects the role's members *create*, not applicable here): `Can view User`. This one has to be global since ktp-api needs to look up any member, including ones who join later — a per-object grant wouldn't cover future users.
+5. Generate the token: **Directory → Tokens and App passwords → Create**, Identity = the service account, **Intent = API Token** (this field matters — other intents get rejected as `Token invalid/expired` even though the token exists and looks otherwise correct).
+6. Copy the token into `AUTHENTIK_API_TOKEN` in ktp-api's `.env`. `docker compose restart` does **not** re-read `.env` — use `docker compose up -d` (recreate) after changing it.
 
 ---
 
-## User Deletion (Manual Process)
+## Webhook (User Deletion)
 
-Until the webhook is fully working:
+A notification transport calls the API when a user is deleted in Authentik. **Working and confirmed in production** — deleting a user in Authentik correctly removes their row from `users` with no manual step.
 
-1. In Authentik: **Directory → Users → select user → Delete**
-2. On LXC 118 (PostgreSQL):
-   ```bash
-   su - postgres
-   psql -d ugaktp_db
-   DELETE FROM users WHERE username = 'username';
-   ```
+**Transport URL (internal):** `http://10.0.0.53:4000/webhooks/authentik`  
+**Trigger:** Event Matcher Policy — Action: `Model Deleted`, Model: `authentik_core.user`, App field: **blank** (see below for why)
+
+This took a while to get right — two independent, non-obvious Authentik-side misconfigurations, neither on the ktp-api side:
+
+1. **The Notification Rule needs a Group or "Send notification to event user" set**, or the whole Rule silently no-ops regardless of how correctly the Policy/Transport are configured. There's no error shown anywhere for this — it just never fires.
+2. **The Event Matcher Policy's "App" field compares against `event.app`** (the Event object's own originating-subsystem field), **not** `event.context.model.app` (the app of the model that actually changed) — confirmed by reading Authentik's source (`authentik/policies/event_matcher/models.py`). A real user-deletion event never satisfies `event.app == "authentik_core"`, so a Policy with App set here always silently fails to match even when Action and Model are both correct. Fix: leave App blank.
+
+**If this breaks again:** check `docker logs worker` on the Authentik host (the *worker* container specifically, not `server` — confirm the exact container name with `docker ps`, it's changed before). Structured JSON logs include a `policy_execution` entry per policy per event with a per-criterion pass/fail, which is the fastest way to see exactly which criterion is failing.
 
 ---
 
