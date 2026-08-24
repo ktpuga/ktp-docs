@@ -647,17 +647,31 @@ Any current member can view.
 
 **Eboard only.** `{ "role": "chair" | "member" }` — auto-adds the target user as a committee member first if they aren't already one.
 
-### `PUT /committees/:id/rush-data-access`
+### `PUT /committees/:id/pledge`
 
-**Eboard only.** `{ "can_view_rush_data": true | false }` — designates this committee as one whose members may read the [rushee interest form data](#rushee-interest-form-data), GPAs included. This is how the pledge committee gets access. Responds with the updated committee.
+**Eboard only.** `{ "is_pledge_committee": true | false }` — marks this committee as **the** pledge committee, or clears the mark. Responds with the updated committee.
 
-**Eboard, and deliberately not the chair of this committee**, which is the one place this differs from `loadAdministrable`. A chair able to set the flag on their own committee would be granting themselves the exact thing it gates. Same reasoning that keeps `setMemberRole` eboard-only.
+This replaced `PUT /committees/:id/rush-data-access` in migration `1789000000000`. What it grants is much wider than the old flag's name suggested: the [rushee interest form data](#rushee-interest-form-data), the per-rushee profile, the decision-night deck and the write-up, **and** interview signup all key off `committees.slug = 'pledge'`.
 
-The value must be a real boolean. The string `"false"` is a `400` rather than being read as truthy — for an access flag, leniency in that direction grants access nobody asked for.
+**Eboard, and deliberately not the chair of this committee**, which is the one place this differs from `loadAdministrable`. A chair able to set it on their own committee would be granting themselves every rushee's GPA and every interview note. Same reasoning that keeps `setMemberRole` eboard-only.
 
-More than one committee can carry the flag at once. Rush is co-run in some semesters, and the alternative would be eboard revoking one committee to grant another.
+The value must be a real boolean. The string `"false"` is a `400` rather than being read as truthy — for an access gate, leniency in that direction grants access nobody asked for.
 
-`can_view_rush_data` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits.
+**At most one committee holds it**, enforced by a partial unique index rather than by this route. Setting it on a second committee **moves** it, atomically, rather than erroring: a `409` telling eboard to go and un-set the other one first would be a worse version of the same outcome.
+
+`slug` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits.
+
+:::warning Clearing is addressed to a specific committee
+`is_pledge_committee: false` on a committee that no longer holds the slug is a **no-op**, not a wipe of whoever holds it now. Without that, a stale page open in another tab could clear a mark that had since moved elsewhere.
+:::
+
+:::danger `setSlug` needs a real transaction, and this is not defensive habit
+`committees_slug_key` is a **partial** unique index, so moving the slug must clear before it sets. A single `UPDATE` with a `CASE` fails on a duplicate that only ever existed mid-statement, and a partial unique **cannot be made `DEFERRABLE`** — that applies to constraints, and a partial unique can only be an index. It uses `pool.connect()`, never `query()`, for the same reason `interviewModel.book()` does.
+:::
+
+:::info `can_view_rush_data` still exists, and is dead
+Phase 1 of 2. The column is still on the table and still in the projection, so a client mid-deploy does not see the key vanish — but **no permission check reads it any more**. Dropping it is a new migration; `1789000000000` is deployed and therefore frozen.
+:::
 
 ---
 
@@ -665,9 +679,30 @@ More than one committee can carry the flag at once. Rush is co-run in some semes
 
 The questions the chapter used to collect in a Google Form, asked instead on the rushee's profile builder. `GET /rush-data` is the response sheet that replaces it.
 
+:::danger Route order in `routes/rushData.js` is load-bearing
+Express matches `GET /:id` against a single segment, so registered first it would also answer `/access` and `/presentation` with the profile handler and go looking for a rushee whose id is the literal string `"access"`. **Every static path stays above the parameterised one.** The file used to say "there is no `/:id` route here today" — there is now. Same trap, same shape, as `/homepage-photos/collections`.
+:::
+
 **This router is not under `/admin`**, and that is the whole point of it. `routes/admin.js` carries `requireGroup("eboard")` at the router level, and this surface is deliberately reachable by the pledge committee too — a committee is a Postgres row rather than an Authentik group, so no `requireGroup` call can express the rule. The router applies `requireAuth` plus a `SHARED_ALBUM_GROUPS` floor (**not** `RUSH_ACCESSIBLE_GROUPS` — a rushee must not reach an endpoint returning every other rushee's GPA), and the real decision happens in the controller. Same shape as `committeesController.loadAdministrable`.
 
-**The rule is eboard OR a member of any committee flagged with `can_view_rush_data`.** A union with no deny side. The eboard check runs first and short-circuits the query.
+**The rule is eboard OR a member of the committee whose `slug` is `'pledge'`.** A union with no deny side. The eboard check runs first and short-circuits the query — they are authorised by definition, so there is no reason to ask Postgres about their committees.
+
+`mayViewRushData` is **the one export every rush-facing surface uses**. The table, the profile, the deck and the write-up all call it rather than re-deriving the rule, so there is exactly one answer to "may this person see rushee data" and it cannot drift between four controllers.
+
+### The four tiers, which are not the same tier
+
+Read this before touching any route below. Collapsing any two of these is the failure mode.
+
+| Surface | Who |
+|---|---|
+| Rushee profile, interest form, **GPA** | eboard + **any** pledge committee member |
+| Decision night deck | eboard + **any** pledge committee member |
+| Presentation write-up (**write**) | eboard + the pledge **chair** only |
+| Interview notes | eboard + pledge chair + **pledge members who ran that rushee's slot** |
+
+:::danger Rushees never see notes about themselves
+Every notes route carries `requireGroup(...SHARED_ALBUM_GROUPS)`, and `"rush"` is deliberately **absent** from that list. `interviewNoteModel` has exactly one consumer. The way this breaks is somebody adding a note field to a rushee-facing projection, or deleting that per-route gate for looking redundant.
+:::
 
 ### `GET /rush-data`
 
@@ -681,9 +716,81 @@ The projection *is* the CSV export's column list, in the order the Google Form a
 
 ### `GET /rush-data/access`
 
-`{ "can_view": true | false }` — answers `200` either way, so asking the question is never itself a failure.
+Answers `200` either way, so asking the question is never itself a failure.
+
+```json
+{
+  "can_view": true,
+  "can_edit_presentation": false,
+  "pledge_committee": { "id": "4", "name": "Pledge", "slug": "pledge" },
+  "pledge_committee_set": true
+}
+```
 
 Its own endpoint rather than letting a client infer the answer from a `403`, for the same reason `GET /interviews/interviewer-schedules` backs the Interviews tab: a nav entry that appears and then `403`s is worse than no nav entry.
+
+**`can_edit_presentation` is split from `can_view` deliberately.** The pledge chair authors the deck and an ordinary pledge member only reads it, so a page handed nothing but `can_view` renders an editor that `403`s on save — and the person finds out after typing.
+
+:::warning `pledge_committee_set` is a tri-state, and the `null` is load-bearing
+`false` means "you are eboard and nobody has set one". `null` means "you are not eboard, so you are not being told" — both `pledge_committee` fields are eboard-only, because a member has no way to act on it and the committee roster is not their business.
+
+Only `false` may raise the website's "No pledge committee is set" banner. Until a committee is marked, **every** rush surface is eboard-only and the pledge committee is locked out with nothing anywhere explaining why — which somebody would debug as a broken permission. The migration's seed deliberately declines to guess when zero or two committees match, so unset is an *expected* state rather than an error.
+:::
+
+### `GET /rush-data/presentation`
+
+**The decision-night deck.** Every rushee with their signup details and their write-up, ordered by display name so the deck is stable between openings — somebody pages back to slide 14 mid-discussion and finds the person they left.
+
+```json
+[{ "candidate_id": "…", "candidate_name": "…", "profile_picture_asset_id": null,
+   "major": "…", "minors": "…", "gpa": "3.75", "graduation_date": "Spring 2028",
+   "heard_from": "…", "presentation_body": null, "presentation_updated_at": null }]
+```
+
+Read access, not write: the whole pledge committee watches the meeting, so they can all open it.
+
+:::info The deck is the roster, not the notes table
+`findDeck` starts `FROM users` and `LEFT JOIN`s the write-up. The old decision-night query started `FROM interview_notes`, so **a rushee nobody had written about was absent from the meeting entirely** — no slide, and therefore undiscussable. It is also not scoped to an interview round, so a rushee who never booked still gets a slide.
+:::
+
+`presentation_body` is **`null`, never `""`**. The authoring tab counts blanks to tell the chair how many rushees are still unwritten, and `""` would be indistinguishable from a real empty save. That is why clearing has its own verb below rather than saving an empty string.
+
+### `GET /rush-data/:id`
+
+One rushee's profile: the interest form, their interview, and the booking id the notes panel is addressed by.
+
+```json
+{ "rushee": { "…": "…" },
+  "interview": { "booking_id": "…", "schedule_id": "…", "schedule_title": "…",
+                 "startDate": "…", "endDate": "…", "location": null, "interviewers": [] },
+  "presentation": { "body": "…", "updated_by_name": "…", "updated_at": "…" },
+  "can_view_notes": true,
+  "can_edit_presentation": false }
+```
+
+`interview` and `presentation` are each **`null` when absent, and neither absence is an error.** A rushee with no booking still gets a profile with the interview section simply missing — the chapter's rule is that no interview means no bid, and that is a fact worth stating rather than a page worth hiding.
+
+**The notes themselves are not in this response.** The website mounts the existing `InterviewNotes` component, addressed by `booking_id`, which already handles the access tiers and the edit rules. Duplicating them here would mean two projections of the most sensitive table in the product — which is why **no candidate-addressed notes endpoint was built and none is needed.**
+
+:::danger The `404` is a permission answer wearing a `404`
+`findRusheeById` carries the **same audience filter** as the table (`member_group = 'rush'`, not deleted, not a test account) rather than being a bare lookup by id. Without it this route would read any user row by id and return a member's, an alumnus's or eboard's date of birth, phone number and GPA. That one `WHERE` clause is the whole boundary; the test suite was proven to go red on both the read and write paths when it was removed.
+:::
+
+**`can_view_notes` is computed server-side and is narrower than access to this page.** Render the notes panel only when it is true — a panel that renders and then `403`s tells somebody they have permission right up until they do not. It reuses `interviewsController`'s own predicate rather than restating the rule, so there is one copy and not two that agree until the day one is edited.
+
+### `PUT /rush-data/:id/presentation`
+
+**Eboard or the pledge chair.** `{ "body": "…" }`, capped at `TEXT_LIMITS.PRESENTATION_NOTE` (**3000** — half an interview note, because this is read off a wall). Responds with the row. A `400` carries `field: "body"` so the client can put the length message beside the textarea.
+
+`PUT`, not `POST`: one row per candidate makes the write idempotent by construction, so the client needs no create-versus-update branch. **Last save wins, deliberately** — this is a shared field being prepared collaboratively before a meeting, not a set of attributed opinions, and merging two people's prose is a job for the two people writing it.
+
+Gated **twice**: `requirePledgeManage` on the route and `mayEditPresentation` in the controller. Not redundancy for its own sake — `getRushDataAccess` has to answer "may I edit?" *without* gating on it, so the predicate has to exist as a function anyway, and having the route carry it too means a controller edit alone cannot open the write.
+
+### `DELETE /rush-data/:id/presentation`
+
+**Eboard or the pledge chair.** `204`, or `404` if nothing was written.
+
+Its own verb rather than saving an empty string, because `body` is `NOT NULL` and `""` would be a row that exists and says nothing — which the deck cannot tell apart from a slide somebody is still drafting.
 
 ---
 

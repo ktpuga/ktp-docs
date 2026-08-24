@@ -366,23 +366,51 @@ The caret position is returned by that same pure function and applied in an effe
 
 ### Decision night
 
-`/admin/interviews` → open a round → **Decision night**. One candidate per screen, projected: photo and identity on the left, every interviewer's notes on the right, arrow keys or space to advance, Esc to close. It replaces a Google Slides deck that was rebuilt by hand every round.
+**Admin → Rushees → Presentation → Decision night**, or the same tab at `/member/rush-data` for the pledge committee. One candidate per screen, projected: photo and identity on the left, the write-up on the right, arrow keys or space to advance, Esc to close. It replaces a Google Slides deck that was rebuilt by hand every round.
 
-It reads `GET /interviews/schedules/:id/notes`, which carries `candidate_name`, `profile_picture_asset_id`, `major`, `graduation_date` and `gpa` per candidate. Those last four ride on the **round-wide** read only — `findForCandidate`, the panel an interviewer opens mid-round, has no reason to carry profile data and does not.
+:::danger It no longer projects interview notes, and must not again
+Projecting the raw notes contradicts "notes are the pledge committee only" the moment a projector is switched on: a note is one named person's private judgement, written for a committee, and putting it on a wall publishes it to the whole chapter.
 
-`gpa` came from the [rushee interest form](./rush-portal.md#the-interest-form) and its split across those two reads *is* the access rule for the column. Decision night is where the chapter votes, so the number belongs on the slide; the panel an interviewer opens mid-interview does not need it and does not get it.
+It now renders `rushee_presentations` — **one shared write-up per rushee**, curated before the meeting by eboard and the pledge chair, which is a thing written to be read aloud. Do not point `DecisionNight.jsx` back at `getRoundNotes`.
+:::
 
-That makes decision night a **wider** audience for a GPA than the Rushee Data table, which is eboard plus the pledge committee: this route is `manage`-gated, so every committee chair sees GPAs here. Deliberate — decision night is a room, not a permission.
+It reads `GET /rush-data/presentation` and takes **no `scheduleId`**. The button used to live on `/admin/interviews` inside the round-notes card, and moved for two reasons: the deck is no longer built from one round's notes, and `/admin/interviews` is eboard-only while the deck is readable by the whole pledge committee. It belongs beside the text it projects.
+
+The slide carries `major`, `minors`, `graduation_date`, `gpa` and `heard_from`. Minors and "how they heard" were added when it moved — both were already on the interest form and both come up in the room, so whoever was presenting had been reading them off a second screen.
+
+`gpa` came from the [rushee interest form](./rush-portal.md#the-interest-form). Decision night is where the chapter votes, so the number belongs on the slide; the panel an interviewer opens mid-interview does not need it and does not get it.
 
 It renders as the string the API sent. `users.gpa` is `NUMERIC` and node-postgres reads `NUMERIC` back as text, so `"3.75"` arrives already formatted; a `toFixed` in the component would put `NaN` on a projector the first time a candidate left it blank.
 
 `graduation_date` is free text a member typed (`"Spring 2028"`), not a date. It is rendered as stored; nothing parses it.
 
-:::info Only candidates with at least one note appear
-The deck is driven by `interview_notes`, not by the booking list, so a candidate nobody wrote about has no slide. If decision night needs to walk **every** booked candidate including the silent ones, that is a change to `findForSchedule`, not to the component.
+:::info Every rushee gets a slide, written up or not
+The deck is driven by the **rushee roster** — `findDeck` starts `FROM users` and `LEFT JOIN`s the write-up. The old query started `FROM interview_notes`, so a candidate nobody wrote about had no slide and **could not be discussed at the meeting at all**. An unwritten rushee now shows an explicit "Nobody has written this one up yet" slide rather than an absence nobody notices. A rushee who never booked an interview still gets one too.
 :::
 
-The view is **read-only**, and deliberately so. It is the same reasoning that keeps a pencil off eboard's view of someone else's note: a room full of people watching a judgement get rewritten is the worst possible moment for the attribution to go stale. Notes are edited from the interviewer's own page, before the meeting.
+The view is **read-only**, and deliberately so: a room full of people watching a write-up get rewritten is the worst possible moment for it to change under them. It is edited from the Presentation tab, before the meeting.
+
+### The presentation write-up
+
+`rushee_presentations`, one row per rushee, edited in `components/rush/PresentationTab.jsx`. **Not interview notes**, and the distinction is the reason it is a separate table and a separate component:
+
+| | **Interview notes** | **The write-up** |
+|---|---|---|
+| How many | several per candidate | **one**, shared |
+| Attributed | yes, per author | no — last save wins |
+| Who may write | the interviewer who ran the slot | eboard + the pledge **chair** |
+| Who sees it | eboard, pledge chair, that slot's interviewers | **the whole chapter, on a projector** |
+| Cap | `INTERVIEW_NOTE` (6000) | `PRESENTATION_NOTE` (**3000**) |
+
+Half the length, because this one is read off a wall and a slide that scrolls has already failed.
+
+The tab lists every rushee as an accordion with a written/blank marker, and counts the blanks at the top so the chair can see how many are still unwritten before the meeting starts. Clearing has its own verb (`DELETE`) rather than saving `""`, because `body` is `NOT NULL` and an empty row is indistinguishable from a slide somebody is still drafting.
+
+:::warning The pledge chair is not eboard
+`proxy.ts` refuses them all of `/admin`, so the tab exists in **both** portals — `/admin/rushees` for eboard and `/member/rush-data` for the pledge committee, one shared component either way. An admin-only Presentation tab would have granted a write permission with nowhere to spend it.
+
+The editor renders only when `can_edit_presentation` is true; an ordinary pledge committee member gets the same tab read-only, plus the Decision night button.
+:::
 
 ## Calendars
 

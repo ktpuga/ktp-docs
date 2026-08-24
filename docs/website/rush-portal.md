@@ -92,7 +92,9 @@ One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pag
 | Route | Audience |
 |---|---|
 | `/admin/rushees` (Rushee Data tab) | Eboard |
-| `/member/rush-data` | The pledge committee |
+| `/member/rush-data` (Rushee Data tab) | The pledge committee |
+
+Both routes now carry a **Presentation** tab beside the table (see [Decision night](./interviews.md#the-presentation-write-up)), and a **per-rushee profile** at `/admin/rushees/[id]` and `/member/rush-data/[id]` — same two-routes-one-component shape, reached by clicking any row of the table.
 
 **Two routes rather than one, because no single route can serve both.** `proxy.ts` hard-gates `/admin` to the `eboard` group, and it redirects an eboard-only account *away* from `/member`. It also cannot help here at all: the rule involves committee membership, which lives in Postgres and deliberately never in the JWT, so the proxy has nothing to check.
 
@@ -100,11 +102,21 @@ One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pag
 
 ### How the pledge committee gets in
 
-`committees.can_view_rush_data`, a boolean eboard toggles from the committee's own detail page.
+`committees.slug = 'pledge'`, a switch eboard flips from the committee's own detail page (**"This is the pledge committee"**).
 
-A flag rather than a name match: committees are free-form rows, so "the pledge committee" is not something the schema knows, and `name LIKE '%pledge%'` would make the access rule a substring — renaming it to "New Member Education" would silently lock everyone out, and a second committee with "pledge" in its name would silently let them in.
+A stable machine name rather than a name match: committees are free-form rows, so "the pledge committee" is not something the schema knows, and `name LIKE '%pledge%'` would make the access rule a substring — renaming it to "New Member Education" would silently lock everyone out, and a second committee with "pledge" in its name would silently let them in.
 
-The toggle is **eboard-only, not the chair of that committee** — a chair who could set it on their own committee would be granting themselves the GPAs it gates. The flag rides on every committee shape so the card badges it for all members: an access grant nobody can see is one nobody audits.
+The switch is **eboard-only, not the chair of that committee** — a chair who could set it on their own committee would be granting themselves the GPAs and the interview notes it gates. `slug` rides on every committee shape so the card badges it for all members: an access grant nobody can see is one nobody audits.
+
+**At most one committee holds it**, enforced by a partial unique index. Turning it on somewhere else **moves** it, so the control says so out loud before you click.
+
+When no committee is marked, eboard sees a **"No pledge committee is set"** banner on the committees list. That is not decoration: until one is marked, every rush surface is eboard-only and the pledge committee is locked out with nothing anywhere explaining why — which somebody would otherwise debug as a broken permission.
+
+:::info This replaced `can_view_rush_data`
+Migration `1789000000000`. The old flag was **not broken** and this is not a repair — eboard had set it on the Pledge committee and it was answering correctly. What changed is that four surfaces now ask the same question (the table, the rushee profile, the write-up and interview signup), and a column named `can_view_rush_data` can only honestly gate the first. One identity beats four booleans that can disagree about who the pledge committee is.
+
+The column still exists and is dead; dropping it is a second migration. The website's old toggle called `PUT /committees/:id/rush-data-access`, which the API had already deleted — so every click `404`ed silently until the control was replaced.
+:::
 
 ### The export
 
