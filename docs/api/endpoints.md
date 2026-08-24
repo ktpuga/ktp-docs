@@ -647,17 +647,48 @@ Any current member can view.
 
 **Eboard only.** `{ "role": "chair" | "member" }` — auto-adds the target user as a committee member first if they aren't already one.
 
-### `PUT /committees/:id/pledge`
+### Committee slugs
 
-**Eboard only.** `{ "is_pledge_committee": true | false }` — marks this committee as **the** pledge committee, or clears the mark. Responds with the updated committee.
+A **slug** is a committee's stable machine name. It is how a feature says "the committee that does X" without hardcoding a committee id or matching on a name eboard can rename. At most **one** committee carries any given slug, enforced by the partial unique index `committees_slug_key` (migration `1789000000000`).
 
-This replaced `PUT /committees/:id/rush-data-access` in migration `1789000000000`. What it grants is much wider than the old flag's name suggested: the [rushee interest form data](#rushee-interest-form-data), the per-rushee profile, the decision-night deck and the write-up, **and** interview signup all key off `committees.slug = 'pledge'`.
+The registry lives in **`services/committeeSlugs.js`** and is the extension point:
+
+| Slug | Grants |
+|---|---|
+| `pledge` | The [rushee interest form data](#rushee-interest-form-data), the per-rushee profile, the decision-night deck and write-up, and interview signup. |
+| `judicial` | The [member report queue](#reports--moderation), including resolving and dismissing reports. |
+
+:::tip Adding a committee-specific feature later is one entry
+Add a key to `COMMITTEE_SLUGS` and gate the new feature on it. Everything else is already generic and reads the registry: `PUT /committees/:id/slug` validates against it, `committeeModel.isSlugMember` / `isSlugChair` take the slug as an argument, and the website renders one switch per entry from `GET /committees/slugs`.
+
+The full cost of a third slug is that entry plus the permission check in whatever it gates. **No migration, no column, no new route.**
+:::
+
+Because the index is unique on the **value**, `pledge` and `judicial` sit on two different committees quite happily. A committee still holds at most one slug, because `slug` is a single column — claiming a second one on the same committee replaces the first.
+
+### `GET /committees/slugs`
+
+**Eboard only.** The registry as `[{ slug, label, description }]`, so the website can render one switch per grant without a hardcoded list of its own. The descriptions are user-facing: eboard reads what a switch hands over before flipping it.
+
+### `PUT /committees/:id/slug`
+
+**Eboard only.** `{ "slug": "pledge" | "judicial" | null }` — claims a slug for this committee, or `null` to clear whatever mark it holds. Responds with the updated committee.
+
+Validated against the registry. An unknown value is a `400` and is never stored: the column is plain `TEXT`, so Postgres would accept anything, and a junk slug would then sit there looking like a grant while matching no permission check anywhere. That is worse than a refusal, because nobody would notice.
+
+:::note `PUT /committees/:id/pledge` is a deprecated alias
+It still works and translates into the generic form. It is kept so the two halves can deploy minutes apart without the website's switch 404ing — which is not hypothetical, because that is exactly what happened when `rush-data-access` was deleted while the website still called it.
+
+**Before removing it, grep the website for `committees/${id}/pledge`.** That is the check that was skipped last time.
+:::
+
+This replaced `PUT /committees/:id/rush-data-access` in migration `1789000000000`. What it grants is much wider than that old flag's name suggested.
 
 **Eboard, and deliberately not the chair of this committee**, which is the one place this differs from `loadAdministrable`. A chair able to set it on their own committee would be granting themselves every rushee's GPA and every interview note. Same reasoning that keeps `setMemberRole` eboard-only.
 
 The value must be a real boolean. The string `"false"` is a `400` rather than being read as truthy — for an access gate, leniency in that direction grants access nobody asked for.
 
-**At most one committee holds it**, enforced by a partial unique index rather than by this route. Setting it on a second committee **moves** it, atomically, rather than erroring: a `409` telling eboard to go and un-set the other one first would be a worse version of the same outcome.
+**At most one committee holds a given slug**, enforced by a partial unique index rather than by this route. Claiming one that another committee holds **moves** it, atomically, rather than erroring: a `409` telling eboard to go and un-set the other one first would be a worse version of the same outcome.
 
 `slug` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits.
 
@@ -1358,7 +1389,17 @@ There used to be a singleton Eboard chat re-synced on every login. **It was remo
 
 ## Reports & Moderation
 
-App Store safety requirement (reporting/blocking/moderation for an app with user-generated content). Submitting a report is self-service; reviewing the queue is eboard-only — there's no separate "moderator" Authentik group, this reuses eboard the same way every other admin-gated feature does.
+App Store safety requirement (reporting/blocking/moderation for an app with user-generated content). Submitting a report is self-service; reviewing the queue is **eboard or the judicial committee**.
+
+There is no separate "moderator" Authentik group and there is deliberately no attempt to invent one. The rule is expressed as `reportsController.mayModerateReports`, which is eboard **or** a member of the committee carrying [`slug = 'judicial'`](#committee-slugs) — because which committee is the judicial committee is a Postgres row, not a group, so no `requireGroup` call can say it.
+
+:::danger Not the bare `chair` group
+`chair` is an Authentik group worn by the chair of **every** committee. Accepting it here would hand the social chair every conduct report in the chapter. That is not hypothetical — it is the exact bug found in `interviewsController`'s `MAY_MANAGE`, where it had been live for two weeks. `test/judicialReports.test.js` pins it.
+:::
+
+The **whole** judicial committee, not only the chair. Code of Conduct Section 17 makes the Judicial Board an independent body that arbitrates, with the Chair handling situational discipline; a board that cannot read the matter it is convened to decide would have the chair relaying report contents by hand, which is its own confidentiality problem.
+
+**Fails closed** when no committee carries the slug: eboard still gets through, nobody else does. The opposite polarity would open every report in the chapter to every committee member for as long as the slug went unset.
 
 ### `POST /reports`
 
@@ -1378,13 +1419,25 @@ Any rush-accessible member. `{ "content_type": "user" | "message" | "group_messa
 
 `content_id` is validated because the column is loose `TEXT` shared across three tables, so the database will hold any string — see [Group chats](../website/messaging.md#the-report-escape-hatch) for what a non-numeric value there used to be able to do.
 
+### `GET /reports/access`
+
+`{ "can_view": true | false }` — answers `200` either way, so asking is never itself a failure.
+
+Its own endpoint rather than letting the client infer it from a `403`, exactly like `GET /rush-data/access`: a nav entry that appears and then `403`s is worse than no nav entry.
+
 ### `GET /reports`
 
-**Eboard only.** Optional `?status=open|resolved|dismissed`. Returns reporter/reported-user names already joined in.
+**Eboard or the judicial committee.** Optional `?status=open|resolved|dismissed`. Returns reporter/reported-user names already joined in.
 
 ### `PUT /reports/:id/status`
 
-**Eboard only.** `{ "status": "resolved" | "dismissed" | "open", "moderator_response": "..." }` — stamps `resolved_by`/`resolved_at` whenever status moves away from `open`.
+**Eboard or the judicial committee.** `{ "status": "resolved" | "dismissed" | "open", "moderator_response": "..." }` — stamps `resolved_by`/`resolved_at` whenever status moves away from `open`.
+
+Same gate as reading, deliberately. Code of Conduct Section 17 makes the Judicial Chair responsible for situational disciplinary action, so a read-only queue would leave the people who actually handle a report unable to close it — and the queue would fill with open items that were long since dealt with.
+
+:::warning The judicial chair is not eboard
+`proxy.ts` refuses them all of `/admin`, so the website carries a member-side copy of the queue at **`/member/reports`** alongside eboard's at `/admin/oversight`. Without it the slug would grant an access they had no way to reach — the same trap the pledge chair hit with the decision-night write-up. Anything the judicial committee may do has to exist on the member side too.
+:::
 
 ---
 
