@@ -755,9 +755,7 @@ Answers `200` either way, so asking the question is never itself a failure.
 ```json
 {
   "can_view": true,
-  "can_edit_presentation": false,
-  "pledge_committee": { "id": "4", "name": "Pledge", "slug": "pledge" },
-  "pledge_committee_set": true
+  "can_edit_presentation": false
 }
 ```
 
@@ -765,10 +763,12 @@ Its own endpoint rather than letting a client infer the answer from a `403`, for
 
 **`can_edit_presentation` is split from `can_view` deliberately.** The pledge chair authors the deck and an ordinary pledge member only reads it, so a page handed nothing but `can_view` renders an editor that `403`s on save — and the person finds out after typing.
 
-:::warning `pledge_committee_set` is a tri-state, and the `null` is load-bearing
-`false` means "you are eboard and nobody has set one". `null` means "you are not eboard, so you are not being told" — both `pledge_committee` fields are eboard-only, because a member has no way to act on it and the committee roster is not their business.
+:::info `pledge_committee` and `pledge_committee_set` were removed 2026-08-24
+This endpoint used to also return the pledge committee and a tri-state `pledge_committee_set`, to raise a "No pledge committee is set" banner. **Both are gone, and nothing ever consumed them** — the website mapped them and no component read either one.
 
-Only `false` may raise the website's "No pledge committee is set" banner. Until a committee is marked, **every** rush surface is eboard-only and the pledge committee is locked out with nothing anywhere explaining why — which somebody would debug as a broken permission. The migration's seed deliberately declines to guess when zero or two committees match, so unset is an *expected* state rather than an error.
+The warning they exist for has not gone anywhere; it moved and got wider. The committees page now raises a notice for **every** slug in the registry that no committee holds, by joining [`GET /committees/slugs`](#get-committeesslugs) against the `slug` that already rides on every committee shape. That covers `judicial` and anything added later, which the pledge-only version could not.
+
+Why it matters either way: until a committee is marked, every surface behind that grant is eboard-only and the committee is locked out with nothing explaining why — which somebody debugs as a broken permission. The migration seeds deliberately decline to guess when zero or two committees match, so unset is an *expected* state rather than an error.
 :::
 
 ### `GET /rush-data/presentation`
