@@ -658,47 +658,50 @@ The registry lives in **`services/committeeSlugs.js`** and is the extension poin
 | `pledge` | The [rushee interest form data](#rushee-interest-form-data), the per-rushee profile, the decision-night deck and write-up, and interview signup. |
 | `judicial` | The [member report queue](#reports--moderation), including resolving and dismissing reports. |
 
-:::tip Adding a committee-specific feature later is one entry
-Add a key to `COMMITTEE_SLUGS` and gate the new feature on it. Everything else is already generic and reads the registry: `PUT /committees/:id/slug` validates against it, `committeeModel.isSlugMember` / `isSlugChair` take the slug as an argument, and the website renders one switch per entry from `GET /committees/slugs`.
+:::tip Adding a committee-specific feature later is one entry and one migration
+Add a key to `COMMITTEE_SLUGS` and gate the new feature on it. Everything else is already generic and reads the registry: `committeeModel.isSlugMember` / `isSlugChair` take the slug as an argument, `GET /committees/slugs` publishes it, and the committees page renders a "no *X* is set" notice for any slug no committee holds — with no website change at all.
 
-The full cost of a third slug is that entry plus the permission check in whatever it gates. **No migration, no column, no new route.**
+The full cost of a third slug is that entry, the permission check in whatever it gates, and a **data migration pointing the slug at a committee**. No column, no new route.
 :::
 
 Because the index is unique on the **value**, `pledge` and `judicial` sit on two different committees quite happily. A committee still holds at most one slug, because `slug` is a single column — claiming a second one on the same committee replaces the first.
 
 ### `GET /committees/slugs`
 
-**Eboard only.** The registry as `[{ slug, label, description }]`, so the website can render one switch per grant without a hardcoded list of its own. The descriptions are user-facing: eboard reads what a switch hands over before flipping it.
+**Eboard only.** The registry as `[{ slug, label, description }]`.
 
-### `PUT /committees/:id/slug`
+It reports which grants **exist** and what each one hands over. It deliberately does **not** report who holds them: `slug` already rides on every committee shape from `GET /committees`, so the website joins the two client-side rather than this becoming a second, staler answer to the same question.
 
-**Eboard only.** `{ "slug": "pledge" | "judicial" | null }` — claims a slug for this committee, or `null` to clear whatever mark it holds. Responds with the updated committee.
+Its one consumer is the committees page, which renders an amber "no *pledge committee* is set" notice for every registry entry no committee holds. That is what makes the "one entry" promise true on the **website** side too — before it existed the page hardcoded `slug === 'pledge'`, so the judicial slug shipped with no notice at all: an unassigned grant that nothing anywhere mentioned.
 
-Validated against the registry. An unknown value is a `400` and is never stored: the column is plain `TEXT`, so Postgres would accept anything, and a junk slug would then sit there looking like a grant while matching no permission check anywhere. That is worse than a refusal, because nobody would notice.
+:::danger There is NO route that writes `committees.slug`, and that is the design
+A slug decides who reads every rushee's GPA and the chapter's entire conduct record. It was briefly settable from a switch on the committee detail page. That switch, its `PUT /committees/:id/slug` route, the `PUT /committees/:id/pledge` alias and `committeeModel.setSlug` were **all removed** — if you are reading an older copy of this page describing them, that copy is wrong.
 
-:::note `PUT /committees/:id/pledge` is a deprecated alias
-It still works and translates into the generic form. It is kept so the two halves can deploy minutes apart without the website's switch 404ing — which is not hypothetical, because that is exactly what happened when `rush-data-access` was deleted while the website still called it.
+One stray click moved the conduct record to another committee, and nothing downstream could tell that from an intentional change. No confirmation dialog fixes it: the API cannot know which clicks were meant.
 
-**Before removing it, grep the website for `committees/${id}/pledge`.** That is the check that was skipped last time.
+The binding changes at **deploy time**, which makes it an act with an author, a diff and a reviewer:
+
+```sql
+BEGIN;
+UPDATE committees SET slug = NULL       WHERE slug = 'judicial';
+UPDATE committees SET slug = 'judicial' WHERE id = <the committee>;
+COMMIT;
+```
+
+Both statements, in that order, in one transaction. `committees_slug_key` is a **partial** unique index, so moving a slug must clear before it sets: a single `UPDATE` with a `CASE` can fail on a duplicate that only ever existed mid-statement, and a partial unique **cannot be made `DEFERRABLE`** — that applies to constraints, and a partial unique can only be an index. Use one checked-out connection, never `query()` per statement, or `BEGIN` and `COMMIT` land on different pooled sessions and quietly do nothing.
+
+`test/rushInterestData.test.js` and `test/judicialReports.test.js` both assert the write path stays gone. If you are here because you want it back, read `services/committeeSlugs.js` first.
 :::
 
-This replaced `PUT /committees/:id/rush-data-access` in migration `1789000000000`. What it grants is much wider than that old flag's name suggested.
+:::warning A migration that assigns a slug must decline to guess
+`1789000000000` (pledge) and `1789100000000` (judicial) both seed by name and both do **nothing** unless exactly one committee matches. Zero matches, two matches, a slug already assigned, or a candidate already carrying a different slug all leave every row untouched.
 
-**Eboard, and deliberately not the chair of this committee**, which is the one place this differs from `loadAdministrable`. A chair able to set it on their own committee would be granting themselves every rushee's GPA and every interview note. Same reasoning that keeps `setMemberRole` eboard-only.
+Doing nothing is recoverable: the committees page shows an unmissable notice until somebody sets it. Guessing wrong is not — it silently hands rushee GPAs or the conduct record to a committee that should never have seen them.
 
-The value must be a real boolean. The string `"false"` is a `400` rather than being read as truthy — for an access gate, leniency in that direction grants access nobody asked for.
-
-**At most one committee holds a given slug**, enforced by a partial unique index rather than by this route. Claiming one that another committee holds **moves** it, atomically, rather than erroring: a `409` telling eboard to go and un-set the other one first would be a worse version of the same outcome.
-
-`slug` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits.
-
-:::warning Clearing is addressed to a specific committee
-`is_pledge_committee: false` on a committee that no longer holds the slug is a **no-op**, not a wipe of whoever holds it now. Without that, a stale page open in another tab could clear a mark that had since moved elsewhere.
+**Shipping the code without the assignment migration is the failure mode this whole design exists to avoid.** `can_view_rush_data` shipped switched off and the Rushee Data table was eboard-only for weeks while everyone assumed it worked.
 :::
 
-:::danger `setSlug` needs a real transaction, and this is not defensive habit
-`committees_slug_key` is a **partial** unique index, so moving the slug must clear before it sets. A single `UPDATE` with a `CASE` fails on a duplicate that only ever existed mid-statement, and a partial unique **cannot be made `DEFERRABLE`** — that applies to constraints, and a partial unique can only be an index. It uses `pool.connect()`, never `query()`, for the same reason `interviewModel.book()` does.
-:::
+`slug` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits — and removing the switch must not also remove the ability to notice it is pointed at the wrong committee.
 
 :::info `can_view_rush_data` still exists, and is dead
 Phase 1 of 2. The column is still on the table and still in the projection, so a client mid-deploy does not see the key vanish — but **no permission check reads it any more**. Dropping it is a new migration; `1789000000000` is deployed and therefore frozen.
