@@ -592,7 +592,11 @@ Four things worth not undoing:
 
 ## Committees
 
-DB-only membership (no Authentik group per committee) — same shape as Group Chats below. Every committee gets a linked group chat created alongside it, and joining/leaving a committee automatically joins/leaves that chat too.
+DB-only membership (no Authentik group per committee) — same shape as Group Chats below.
+
+**A committee has no group chat of its own** (changed 2026-08-24). A chat records which committees it belongs to in `committee_ids`, and `membershipPredicate` derives its members from that at READ time — so it follows people joining and leaving with nothing to reconcile.
+
+The old mechanism is fully gone: no auto-created chat, no `committees.group_chat_id` (dropped in `1789200000000`), no `syncGroupChatMembership`, and deleting a committee no longer deletes a chat. It was the same materialise-one-row-at-a-time shape as the Eboard chat automation removed in `1788800000000`, and it was replaced for the same reason.
 
 ### `GET /committees`
 
@@ -1383,7 +1387,7 @@ This covers `PATCH /:id`, `DELETE /:id`, `PUT /:id/photo`, `PATCH /:id/audience`
 :::
 
 :::note Two chats are managed automatically
-Every committee gets a linked group chat whose membership tracks committee membership; it should not be managed by hand.
+Committees do not own a group chat. Scope a chat to a committee with `committee_ids` and its membership is derived at read time: there is nothing to sync and nothing to manage by hand.
 
 There used to be a singleton Eboard chat re-synced on every login. **It was removed in migration `1788800000000`** — see [Messaging](../website/messaging.md#the-eboard-chat-was-removed).
 :::
