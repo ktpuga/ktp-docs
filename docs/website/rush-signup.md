@@ -42,7 +42,18 @@ Issuing a **separate invitation per event** gives you attribution — you can te
 | `POST /admin/rush-signup` | Creates one. Body: `{ name, expires }` |
 | `DELETE /admin/rush-signup/:pk` | Closes rush |
 
-Nothing is stored in our database. "Is rush open" is answered by asking Authentik, because a mirrored copy could drift from the thing actually enforcing the gate — and the stale copy is the one eboard would be looking at.
+**Authentik still enforces the gate.** Someone holding an old link is refused there once the invitation expires, whatever ktp-api thinks.
+
+The window is now also **mirrored locally**, in a single `rush_signup_state` row (`itoken` + `expires_at`). The concern that used to be recorded here — that a mirrored copy could drift from the thing enforcing the gate, and the stale copy is the one eboard would be looking at — is answered by **splitting the readers**:
+
+| Reader | Source |
+|---|---|
+| `GET /rush-signup/current` (public rush page) | the stored row. Instant, **zero Authentik calls** |
+| `GET /admin/rush-signup` (eboard) | Authentik, **live** |
+
+So eboard never looks at the copy. It exists because the public signup button was three network hops deep and did not render at all until the last one finished. It is kept honest by write-through when eboard opens or closes rush, plus a ~10 minute reconcile that catches invitations changed directly in Authentik's admin UI.
+
+The row stores the **expiry, not a boolean**, so a window that lapses on the clock alone reads as closed with no event needed. And a failed reconcile never writes, so an Authentik blip cannot take signup down.
 
 :::warning Requires a service-account permission
 `ktp-api-service` needs **add / delete / view on Invitation** (Stages → Invitation), granted on its role the same way the group permissions were. Without it these endpoints return 502.
