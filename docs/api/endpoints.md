@@ -919,7 +919,20 @@ Targeted the same way as Events/Announcements (`audience` array or `committee_id
 
 ### `GET /polls`
 
-Visible polls for the caller (or all, if eboard), each with its options, aggregate vote counts per option, the caller's own selection (`my_option_ids`), and `total_votes`. `is_closed` reflects either a manual close or `expires_at` having passed — computed fresh on every read, not a stored flag, so it's always accurate even if nothing ever flips it in the DB.
+Visible polls for the caller (or all, if eboard), each with its options, the caller's own selection (`my_option_ids`), and two visibility flags: `results_visible` and `voters_visible`.
+
+**Vote counts are conditional.** `vote_count` on each option and `total_votes` on the poll are present **only when `results_visible` is true** — they are *omitted*, not sent as zero, because a zero on the wire is a lie a client will faithfully render as "0 votes".
+
+| Flag | True when |
+|---|---|
+| `results_visible` | caller is eboard, OR the poll is closed, OR the caller has voted |
+| `voters_visible` | caller is eboard, OR the poll set `show_voters` **and** `results_visible` is already true |
+
+The second condition on `voters_visible` matters: without it, the voter list would let someone reconstruct a tally they are not yet allowed to see.
+
+:::note Until 2026-08-25 this was a UI convention, not a guarantee
+"Results are hidden until you vote" lived only in the website's JSX while the API sent counts to every member regardless. Anyone with devtools could read a running tally before voting. It is enforced server-side now. Read `results_visible` rather than re-deriving `is_closed || hasVoted`, so the two cannot drift.
+::: `is_closed` reflects either a manual close or `expires_at` having passed — computed fresh on every read, not a stored flag, so it's always accurate even if nothing ever flips it in the DB.
 
 ### `POST /polls`
 
@@ -930,6 +943,7 @@ Visible polls for the caller (or all, if eboard), each with its options, aggrega
   "description": "...",
   "options": ["Monday 6pm", "Wednesday 7pm"],
   "multi_select": false,
+  "show_voters": false,
   "audience": ["active", "chair"],
   "committee_id": null,
   "expires_at": "2026-08-01T23:00:00Z"
@@ -938,6 +952,12 @@ Visible polls for the caller (or all, if eboard), each with its options, aggrega
 `options` needs at least 2. `expires_at` is optional — voting closes automatically at that time with no cron job involved (see `GET /polls` above). Omit for a poll that only closes when eboard manually closes it.
 
 `audience` accepts the same values as an announcement, `rush` included, and rejects anything else with a 400. Rushees vote only in polls that name `rush` explicitly.
+
+`show_voters` is optional and **defaults to false**. It is the per-poll opt-in that lets ordinary members see who voted for what, and it can only be set at creation.
+
+:::danger `show_voters` de-anonymizes individual votes
+Turning it on means everyone who can see the poll can see each person's vote once results are shown to them. Every poll created before 2026-08-25 was made under the promise that only eboard could see this, and members voted on that basis — which is why the column defaults to false and existing polls were never migrated to true.
+:::
 
 :::note `audience` and `committee_id` ADD, they don't narrow
 Send both and both are kept. `findAllForUser` ORs the audience match against the committee match, so a poll aimed at `["pledge"]` plus the Marketing committee reaches **every pledge and everyone on Marketing** — not just the pledges who are also on Marketing.
@@ -959,7 +979,17 @@ Any shared-album-group member. `{ "option_ids": [3] }` — a single id unless `m
 
 ### `GET /polls/:id/stats`
 
-**Eboard only.** Same per-option counts as the list view, but with a `voters` array (name + id) per option.
+Same per-option counts as the list view, plus a `voters` array (name + id) per option.
+
+**No longer eboard-only.** A member may read it when the poll's `voters_visible` is true for them. The route carries no `requireGroup`, because the decision needs the poll and not just the caller; the check lives in `pollsController.getPollStats`.
+
+For a non-eboard caller, three things must all hold:
+
+1. they can see the poll at all (audience/committee) — otherwise this endpoint would leak the existence *and* voters of polls not aimed at them
+2. the poll set `show_voters`
+3. the tally is already visible to them
+
+Failing (1) returns **404, not 403**, so this cannot be used to probe which polls exist. Failing (2) or (3) returns 403.
 
 ---
 
