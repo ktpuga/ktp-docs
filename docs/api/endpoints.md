@@ -367,7 +367,11 @@ Permission depends on who's asking:
 `events.committee_ids` is an `INTEGER[]` — one event can belong to several committees. `announcements.committee_id` is a single nullable ID. Don't assume the two are symmetrical when writing a query across both.
 :::
 
-Setting `requiresAttendance: true` generates a random `attendance_token` server-side the first time. It's never regenerated and never returned by these endpoints — only by `GET /events/:id/attendance/code` below.
+Setting `requiresAttendance: true` generates a random `attendance_token` server-side the first time. It's never regenerated, and as of 2026-08-25 it is **never returned by any endpoint at all**.
+
+:::danger `attendance_token` is a secret key, not a check-in code
+It is the HMAC key that short-lived rotating codes are derived from (`services/attendanceCode.js`). Sending it to a browser would let whoever received it mint valid codes indefinitely, which is the exact hole rotation closes.
+:::
 
 ### `PUT /events/:id`
 
@@ -505,7 +509,11 @@ This is deliberately broader than `checkEventPermission`, which restricts a chai
 
 ### `GET /events/:id/attendance/code`
 
-**Eboard, cabinet or event creator.** Returns `{ eventId, token }` — encode as a QR pointing at `<site>/checkin/:eventId/:token`. 400s if the event doesn't have attendance enabled.
+**Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs }` — encode as a QR pointing at `<site>/checkin/:eventId/:code`.
+
+**The code rotates every 30 seconds.** Callers must re-fetch just after `expiresAt`; `AttendancePage.jsx` reschedules itself from that field and only polls while the QR overlay is actually open.
+
+400s if attendance isn't enabled for the event.
 
 ### `GET /events/:id/attendance`
 
@@ -565,7 +573,23 @@ The accepted cost of a manual finalise is that an event nobody finalises keeps d
 
 ### `POST /checkin/:eventId/:token`
 
-**Any member.** Self check-in, hit after scanning the QR while signed in. Validates that the token matches the event's real one and that the current time falls between the event's start and end plus a **30-minute grace period**. 403s outside that window or on a wrong/stale token.
+**Any member.** Self check-in, hit after scanning the QR while signed in.
+
+The path param is a **rotating code**, not the stored token. It must match the current 30-second period or the one immediately before it (so it is valid for between 30 and 60 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall between the event's start and end plus a **30-minute grace period**.
+
+403s outside that window, on a stale code, or on the raw `attendance_token`.
+
+:::info Why this changed
+The QR previously encoded the raw `attendance_token`, which never rotates. Photographing the board therefore produced a credential that worked **from anywhere** until 30 minutes after the event ended, so a member could text it to somebody at home and have them check in. Attendance carries real chapter consequences, so that was worth closing.
+
+Note what was never broken: check-in requires auth, so a scanner is always recorded as **themselves**. Nobody could ever check in *as* another member. The flaw was purely in relaying proof-of-presence.
+
+**No client clock is involved** — the same server derives and validates the code, so there is no skew to tolerate.
+
+**The URL shape is unchanged**, so the iOS scanner needed no update. It parses the scanned URL and posts immediately, and has no retry queue that a 60-second lifetime could strand.
+:::
+
+**What this does not solve:** a member checking in and then leaving. That needs a check-out step, not a better code.
 
 Regular members get no attendance UI beyond the post-scan confirmation screen. Only chairs and eboard see an Attendance surface in the portal.
 
