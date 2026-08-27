@@ -364,7 +364,7 @@ Permission depends on who's asking:
 `title`/`startDate`/`endDate`/`location` are validated before touching the DB.
 
 :::note Events take an array, announcements take a single ID
-`events.committee_ids` is an `INTEGER[]` — one event can belong to several committees. `announcements.committee_id` is a single nullable ID. Don't assume the two are symmetrical when writing a query across both.
+`events.committee_ids` and `polls.committee_ids` are `INTEGER[]` — one item can belong to several committees. **`announcements.committee_id` is still a single nullable ID** and is now the only one left. Don't assume they are symmetrical when writing a query across both.
 :::
 
 Setting `requiresAttendance: true` generates a random `attendance_token` server-side the first time. It's never regenerated, and as of 2026-08-25 it is **never returned by any endpoint at all**.
@@ -939,7 +939,7 @@ An absent `interviewer_committee_ids` leaves it alone; an **empty array closes t
 
 ## Polls
 
-Targeted the same way as Events/Announcements (`audience` array or `committee_id`, mutually exclusive). Voting is self-service; only eboard sees who voted for what — not anonymous to eboard.
+Targeted the same way as Events: an `audience` array and/or a `committee_ids` array, which **ADD rather than narrow**. Voting is self-service. Who voted for what is eboard-only *unless* the poll opted in with `show_voters` — see `GET /polls/:id/stats`.
 
 ### `GET /polls`
 
@@ -969,7 +969,7 @@ The second condition on `voters_visible` matters: without it, the voter list wou
   "multi_select": false,
   "show_voters": false,
   "audience": ["active", "chair"],
-  "committee_id": null,
+  "committee_ids": [],
   "expires_at": "2026-08-01T23:00:00Z"
 }
 ```
@@ -983,11 +983,35 @@ The second condition on `voters_visible` matters: without it, the voter list wou
 Turning it on means everyone who can see the poll can see each person's vote once results are shown to them. Every poll created before 2026-08-25 was made under the promise that only eboard could see this, and members voted on that basis — which is why the column defaults to false and existing polls were never migrated to true.
 :::
 
-:::note `audience` and `committee_id` ADD, they don't narrow
+:::note `audience` and `committee_ids` ADD, they don't narrow
 Send both and both are kept. `findAllForUser` ORs the audience match against the committee match, so a poll aimed at `["pledge"]` plus the Marketing committee reaches **every pledge and everyone on Marketing** — not just the pledges who are also on Marketing.
 
-Until 2026-08-12 `createPoll` nulled `audience` whenever `committee_id` was set, silently discarding half of what the form submitted and making "roles or committees, pick one" a rule of the API rather than a choice in the UI. Announcements and events had always targeted both together; polls were the outlier.
+Until 2026-08-12 `createPoll` nulled `audience` whenever a committee was set, silently discarding half of what the form submitted and making "roles or committees, pick one" a rule of the API rather than a choice in the UI. Announcements and events had always targeted both together; polls were the outlier.
 :::
+
+### `PUT /polls/:id`
+
+**Eboard only.** Edits `question`, `description`, `audience`, `committee_ids`, `expires_at`, and option **labels**:
+
+```json
+{
+  "question": "Best meeting time?",
+  "committee_ids": [3, 7],
+  "options": [{ "id": 12, "label": "Monday 6pm" }]
+}
+```
+
+:::danger Three things are frozen at creation and this cannot change them
+`show_voters`, `multi_select`, and **which options exist**. Each would rewrite the terms people already voted under:
+
+- flipping `show_voters` on would publish votes cast while they were private
+- going multi-select to single leaves members holding selections the poll now calls impossible
+- `poll_votes` rows point at option ids, so removing an option orphans real votes and adding one changes what people were choosing between *after* they chose
+
+Option **labels** can be corrected, because the ids and therefore every vote survive it. That covers the reason people actually want to edit a poll: a typo.
+:::
+
+An `options` entry whose `id` does not belong to this poll is a **400**, not a silent no-op — otherwise a stray id would relabel another poll's row.
 
 ### `DELETE /polls/:id`
 
@@ -1252,7 +1276,25 @@ A `NULL` `uploaded_by` — the uploader's account was hard-deleted — matches n
 
 ## Announcements
 
-Eboard-only broadcast — one-way, no replies. Any rush-accessible member can view (filtered by audience). Same targeting shape as Events: `audience` is an array, or scope to one `committee_id` instead.
+One-way broadcast, no replies. Any rush-accessible member can view (filtered by audience). Same targeting shape as Events: `audience` is an array, or scope to one `committee_id` instead.
+
+**Who may post, as of 2026-08-25:**
+
+| Caller | May post | May edit / delete |
+|---|---|---|
+| Eboard | anything, including chapter-wide | anything |
+| **Committee chair** ("cabinet") | **only to a committee they chair** | only announcements belonging to a committee they chair |
+| Everyone else | nothing | nothing |
+
+:::warning This mirrors the Events rule on purpose
+`eventsController.checkEventPermission` already says a chair may create committee-scoped events but **not** chapter-wide ones. Announcements now say the same thing. If either changes, change both — the same person being able to reach the whole chapter one way but not the other is worse than either rule alone.
+:::
+
+A chair attempting a chapter-wide post gets a **403, not a silent narrowing** to their committee. Someone who meant to tell everyone is better served by being told no than by quietly reaching six people.
+
+Editing checks **two** committees: the one the announcement belongs to now, and the one the request is moving it to. With only a target check, a chair could edit any committee's announcement by re-pointing it at their own.
+
+Deleting a single media item follows the same rule as editing the announcement, so a chair is never left able to delete a whole post but not one photo from it.
 
 ### `GET /announcements`
 
@@ -1448,6 +1490,56 @@ There used to be a singleton Eboard chat re-synced on every login. **It was remo
 
 ---
 
+## Tickets
+
+Any member telling eboard and the judicial committee **anything**: concerns, suggestions, questions. Requires auth plus a `SHARED_ALBUM_GROUPS` floor — deliberately not `RUSH_ACCESSIBLE_GROUPS`, since a ticket is a channel to the chapter's own leadership and a rushee is not a member of the chapter.
+
+:::info Why this is not the reports table
+`reports` is a **moderation record**: it points at a person or a piece of content, `content_type` is NOT NULL and CHECKed against four values, and its statuses are open/resolved/dismissed. A ticket points at nothing and often is not a complaint at all.
+
+Reusing the table would have meant widening two CHECK constraints that are doing real work, and putting *"here is an idea for spring rush"* in the same queue as *"somebody is harassing me"* — where the urgent thing gets buried and "dismissed" becomes the word for declining a suggestion.
+:::
+
+| Method | Path | Who | Body / notes |
+|---|---|---|---|
+| `POST` | `/tickets` | any member | `{ category, subject, body, anonymous? }`. `category` is one of `concern`, `suggestion`, `question`, `other`. `subject` ≤150, `body` ≤5000 |
+| `GET` | `/tickets` | eboard or judicial | Optional `?status=open\|in_progress\|closed` |
+| `GET` | `/tickets/mine` | any member | Their own **signed** tickets only |
+| `GET` | `/tickets/access` | any member | `{ can_view }`, for deciding whether to render the queue |
+| `PUT` | `/tickets/:id` | eboard or judicial | `{ status?, response? }` |
+
+### Anonymous by default
+
+:::warning This is the OPPOSITE default to `POST /reports`
+A ticket exists to collect candid feedback, and defaulting to named suppresses exactly that. A report defaults to **named** because the board usually needs to follow up.
+
+**Only an explicit `false` signs a ticket.** Anything else — a missing key, a typo, a string — stays anonymous, which is the failure direction that cannot expose somebody who meant to stay unnamed.
+
+Two surfaces, two defaults, deliberately. Do not "make them consistent" without deciding which behaviour you are changing.
+:::
+
+`/^\/tickets$/` is in `middleware/auditLog.js`'s SKIP list. That matters **more** here than for reports, precisely because anonymity is the default: without it, every anonymous ticket would have a matching audit row naming whoever filed it. The pattern is an exact match, so `PUT /tickets/:id` is still logged in full.
+
+### `is_anonymous` is a real column, not an inference
+
+`author_id` being NULL does **not** mean anonymous on its own. `ON DELETE SET NULL` empties that column when a signed author leaves the chapter, so inferring anonymity from it would relabel a departed member's signed ticket as "Anonymous" — a false statement about somebody who did put their name to it.
+
+`GET /tickets` therefore returns three distinguishable states:
+
+| `is_anonymous` | `author` | `author_departed` | Means |
+|---|---|---|---|
+| `true` | `null` | `false` | Nobody was ever recorded |
+| `false` | object | `false` | A signed ticket |
+| `false` | `null` | `true` | Signed, but the author has since left |
+
+### Accepted costs
+
+An anonymous ticket **can never be replied to**, and the person who filed it **cannot read it back** — `findForAuthor` matches on `author_id`, and there isn't one. The form states both plainly rather than burying them.
+
+Read access reuses `reportsController.mayModerateReports` rather than restating it, so the bare `chair` group is refused here too. Accepting it would hand the social chair every concern in the chapter.
+
+---
+
 ## Reports & Moderation
 
 App Store safety requirement (reporting/blocking/moderation for an app with user-generated content). Submitting a report is self-service; reviewing the queue is **eboard or the judicial committee**.
@@ -1475,10 +1567,32 @@ Any rush-accessible member. `{ "content_type": "user" | "message" | "group_messa
 | `reported_user_id` | A canonical UUID. Required for `"user"` (it is the only thing naming the subject), optional otherwise. **404** if it names an account that no longer exists |
 | `reason` | Required, ≤100 characters |
 | `explanation` | Optional, ≤2000 characters |
+| `anonymous` | Optional bool. `true` or `"true"` files anonymously; **anything else files NAMED** |
 
 `reason` and `explanation` are **rejected rather than truncated** when too long: a report is evidence, and a silently shortened account of what happened is worse than being asked to shorten it yourself.
 
 `content_id` is validated because the column is loose `TEXT` shared across three tables, so the database will hold any string — see [Group chats](../website/messaging.md#the-report-escape-hatch) for what a non-numeric value there used to be able to do.
+
+#### Anonymous tickets
+
+`anonymous: true` means **nothing is written down** — not "hidden from the queue". `reporter_id` is left NULL, so nobody can learn who filed it: not the judicial committee, not eboard, not somebody with direct database access. There is no record to find.
+
+:::danger The promise has two halves and both are load-bearing
+Nulling the column alone would be theatre. `middleware/auditLog.js` stamps `actor_id` on **every** mutating request, so an audit row reading *"Ann POSTed /reports at 02:14"* identifies the ticket that appeared at 02:14 exactly as well as a column would have.
+
+So `/^\/reports$/` is in that middleware's SKIP list. If you ever remove it, anonymous reporting silently stops being anonymous and nothing will fail.
+:::
+
+Two deliberate details of that skip:
+
+- **Exact match, so it exempts creation only.** `PUT /reports/:id/status` is still logged in full — acting on a report is a decision with consequences, which is precisely what an audit trail is for.
+- **It skips every report, not just anonymous ones.** Deciding per-request would mean reading and trusting `req.body` inside the middleware, where a multipart quirk or a renamed field would silently start logging the one thing that must never be logged. Named reports lose little; the row itself records who filed them.
+
+⚠ A value that is not `true` or `"true"` files a **named** report. The typo direction is deliberate: silently anonymising a ticket somebody meant to sign would cost the board the ability to follow up, and cannot be undone afterwards.
+
+**The accepted cost:** the board can never ask a follow-up question, and a false report cannot be traced. Rate limiting was considered and deliberately not built.
+
+In `GET /reports`, an anonymous ticket comes back with **`reporter: null`**, not an object of nulls, so the queue renders "Anonymous" rather than a blank that reads like a deleted account.
 
 ### `GET /reports/access`
 
