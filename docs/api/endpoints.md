@@ -266,10 +266,19 @@ Turning it off removes the member from the list **and** stops `/roster/:id/media
     "last_name": "Smith",
     "member_group": "active",
     "graduation_date": "Spring 2026",
+    "birthday": "03-14",
     ...
   }
 ]
 ```
+
+:::warning `birthday` is MONTH AND DAY ONLY, and the raw `dob` is never returned
+The field is formatted in SQL as `TO_CHAR(dob, 'MM-DD')`, so the **birth year never leaves Postgres** and no consumer of this endpoint can recover it. A full date of birth shown to the chapter would also publish everyone's age, which is a different disclosure from a birthday.
+
+It is `null` for the many members who never entered one. The **public** roster (`GET /roster`) returns neither field, the same way it omits `pronouns`.
+
+Formatting happens in the query rather than in a client for a second reason: `dob` is a `DATE`, and parsing `"1998-03-14"` with `new Date()` treats it as UTC midnight, which renders as the previous day in any negative-offset timezone. `TO_CHAR` cannot shift a day.
+:::
 
 ---
 
@@ -856,6 +865,36 @@ Its own verb rather than saving an empty string, because `body` is `NOT NULL` an
 
 ---
 
+## Resumes
+
+A rushee's resume. Uploaded by the rushee, read by them, eboard, or the pledge committee.
+
+### `PUT /resumes/me`
+
+`multipart/form-data` with a **`file`** field. **PDF, `.doc` or `.docx` only**, 10 MB max — the smallest cap of any upload in this API. Returns `{ resume_filename, resume_mime, resume_uploaded_at }`.
+
+Replaces any existing resume, and **unlinks the file it replaced**. Without that, every re-upload would leave bytes on disk that nothing points at.
+
+### `DELETE /resumes/me`
+
+`204`. Clears the columns and removes the file.
+
+### `GET /resumes/:id`
+
+Streams the file. Allowed for the rushee themselves, eboard, or the pledge committee — the same `mayViewRushData` predicate the rest of `/rush-data` uses, so committee membership is read from Postgres rather than from the token.
+
+`?download=1` forces a save dialog. Without it a **PDF** is sent `inline` so it can render in a viewer; a **Word file is always an attachment**, because no browser can render one and offering it inline produces a blank frame rather than an error anyone can act on.
+
+:::warning Two response headers here are load-bearing
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox` are set on every response. These bytes were uploaded by a **rushee** — somebody who is not yet a member — and the website proxies them back under its own origin. The website's proxy route forwards both headers explicitly; dropping either would undo the protection in the one place it matters most.
+
+`resume_mime` goes straight into the `Content-Type` header, so a `CHECK` constraint on the column restricts it to the three accepted values in addition to the uploader's `fileFilter`. A column that accepted any string would be one bad write away from serving `text/html` from our own origin.
+:::
+
+:::note Uploading is not gated on being a rushee
+Any authenticated caller may upload their **own** resume. Someone accepted into a pledge class keeps the `rush` group in Authentik until an admin removes it, so a gate here would revoke their ability to replace their own file on an unrelated admin's schedule, partway through rush. Only the rushee profile surfaces a button.
+:::
+
 ## Interviews
 
 Calendly-style slot signup that replaced meetings for rushees. Router-level gate is **auth + a rush-accessible group**, then narrowed per route. Full design in [Interviews](../website/interviews.md).
@@ -1142,6 +1181,48 @@ Ordered by `display_order`, then `event_date` newest-first, then `id`. `event_da
 :::
 
 ---
+
+## LinkedIn Posts
+
+Chapter LinkedIn posts, ingested from a Discord channel by the [LinkedIn embed bot](../website/linkedin-spotlight.md) and rendered on the public homepage and `/spotlight`.
+
+### `GET /linkedin-posts`
+
+**Public, no auth.** Published posts, newest first. `?limit=` is accepted and **capped at 50** in the model, defaulting to 24 — this is the one unauthenticated route here, and an unbounded limit would be a table scan anybody on the internet could ask for.
+
+Returns the public shape only: `id`, `linkedin_post_id`, `linkedin_urn`, `source_url`, `embed_url`, `created_at`. **`discord_message_id` and `submitted_by_discord_id` are deliberately withheld** — a visitor reading the homepage has no business knowing which member posted a link in Discord.
+
+### `POST /linkedin-posts/ingest`
+
+**The Discord bot only**, authenticated with the shared `X-Bot-Secret` header rather than a bearer token. `{ linkedin_urn, source_url, discord_message_id, submitted_by_discord_id }`.
+
+The server **derives** `linkedin_post_id` and `embed_url` from the URN rather than trusting the bot's copies. Upserts on `linkedin_urn`, so re-scanning the channel history on every restart creates no duplicates.
+
+:::warning LinkedIn IDs are TEXT everywhere, never numbers
+They are 19 digits, past `Number.MAX_SAFE_INTEGER`. One `parseInt` silently corrupts the ID and the resulting embed 404s. The column is `VARCHAR`, the validator refuses a numeric input outright, and the tests say so.
+:::
+
+### `DELETE /linkedin-posts/ingest`
+
+**The Discord bot only.** `{ discord_message_id }`. Unpublishes every post that came from that message; answers `{ "unpublished": n }`.
+
+**Addressed by MESSAGE ID, not by URN**, and that is what makes it work at all. A deleted message reaches the bot as a *partial* — Discord does not resend content the bot never cached, so for anything posted before the process started there is no link left to parse. The message id is always on the delete event and is already stored on the row.
+
+**Answers `200` with a count of `0` rather than `404` when nothing matched.** The bot fires this for every deletion in the channel, because it cannot know whether a message it never saw held a link; a `404` would fill its log with errors describing ordinary behaviour.
+
+**Unpublishes, never deletes.** The row is the only record that a link was submitted and by whom, so a mistaken Discord deletion stays recoverable from the admin panel.
+
+### `GET /linkedin-posts/all`
+
+**Eboard.** Every post including unpublished ones, plus the Discord trace the public shape withholds.
+
+### `PUT /linkedin-posts/:id`
+
+**Eboard.** `{ "is_published": true | false }` — an explicit boolean, nothing else. A missing or mistyped key is a `400` rather than being read as "unpublish", because taking a post off the public site in response to a malformed body is the one failure direction that cannot be allowed here.
+
+:::note Route order is load-bearing
+`/all` and `/ingest` are literal paths that `/:id` would also match. Registered the other way round, `GET /all` would be handled as "the post whose id is the string `all`". Same trap documented on `/rush-data` and `/homepage-photos`.
+:::
 
 ## Documents
 
@@ -1703,16 +1784,27 @@ Updates any supplied boolean; **omitted fields keep their prior value**, so olde
 Per-tab badge counts for the web portal sidebar:
 
 ```json
-{ "announcements": 3, "calendar": 1, "meetings": 0, "polls": 2, "files": 0, "interviews": 0, "committees": 2 }
+{ "announcements": 3, "calendar": 1, "meetings": 0, "polls": 2, "interviews": 0,
+  "committees": 2, "tickets": 1, "reports": 0, "ticket_queue": 0 }
 ```
 
 Each count is "items in this tab created after your cursor for it, that you are allowed to see". **On the first call for a user the cursors are seeded to now and every count is 0** — existing content is never retroactively unread.
 
-:::note Two counts here ignore their tab cursor
-`meetings` counts **unanswered invitations**, and `committees` sums **per-committee** counts plus approval queues. Neither is "new since you last looked", so neither clears by visiting the tab — see `CLEARS_ON_ACTION_NOT_VIEW` on the website side. Their cursor rows are still written and simply unused.
+`files` was removed in August 2026 and is no longer returned. The cursor table's CHECK constraint still permits the value, so old rows are simply ignored.
+
+:::note Four of these counts ignore their tab cursor
+`meetings` counts **unanswered invitations**; `committees` sums **per-committee** counts plus approval queues; `reports` and `ticket_queue` count what is **still open**. None is "new since you last looked", so neither clears by visiting the tab — see `CLEARS_ON_ACTION_NOT_VIEW` on the website side. Their cursor rows are still written and simply unused.
 
 `committees` is the sharper case: its unit of "seen" is the **committee**, not the tab, so it drains as each committee is opened. Zeroing it on arrival would blank the roll-up while every per-committee marker underneath stayed lit.
 :::
+
+:::warning `reports` and `ticket_queue` are permission-gated, and are not tabs
+They are **0 for everybody except eboard and the judicial committee**. The caller is checked with the same `mayModerateReports` helper the report and ticket routes use, because judicial membership is a Postgres row and never an Authentik group — `groups` on the token genuinely cannot answer it. The keys are always present so the client shape does not change; 0 is what a member without access would see regardless.
+
+Both count what is **still unresolved** (`reports.status = 'open'`, `tickets.status <> 'closed'` — so "in progress" still counts) and both have a **fixed cutoff**, so items already open when the badge shipped never appear. Neither has a cursor row, and `POST /notifications/seen` must not be called for them.
+:::
+
+`tickets` is the **author-facing** count: how many of your own signed tickets have been replied to, closed or otherwise touched since you last opened the Tickets page. An anonymous ticket records no author, so it can never appear here.
 
 Counts honour the same audience rules as the corresponding list endpoint, so a badge can never advertise something the caller cannot open. In particular an untargeted announcement or event badges **members only, never rushees**, and a rushee's `announcements` count comes from `rush_announcements` instead.
 
@@ -1720,7 +1812,7 @@ Also quiet on purpose: you are never counted for content you posted yourself, an
 
 ### `POST /notifications/seen/:tab`
 
-Moves that tab's cursor to now — i.e. marks it read. `204` on success. `tab` must be one of `announcements`, `calendar`, `meetings`, `polls`, `files`, `interviews`, `committees`; anything else is a `400`. The list is enforced by a **CHECK constraint** on `notification_cursors.tab` as well as in code, so adding a tab needs a migration.
+Moves that tab's cursor to now — i.e. marks it read. `204` on success. `tab` must be one of `announcements`, `calendar`, `meetings`, `polls`, `files`, `interviews`, `committees`, `tickets`; anything else is a `400`. `reports` and `ticket_queue` are deliberately **not** valid here — they are queue counts with no cursor. The list is enforced by a **CHECK constraint** on `notification_cursors.tab` as well as in code, so adding a tab needs a migration.
 
 **Behavior worth knowing:** DM alerts fire only after the message is persisted, only to the permitted recipient, and **never include the message body**. Event alerts fire on create, material update, or cancellation, to users who can actually see that event and have event notifications enabled. APNs failures are logged and never fail the underlying message/event request — a push that doesn't arrive is not a reason to suspect the send itself failed.
 

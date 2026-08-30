@@ -16,9 +16,11 @@ The one that matters most in practice: **push only reaches people who installed 
 
 ## Tab badges
 
-Every portal sidebar item can carry a count. Seven tabs do: **Announcements, Calendar, Meetings, Polls, Files & Photos, Interviews, Committees**. Messages carries one too, from a different mechanism (below).
+Every portal sidebar item can carry a count. Six tabs do: **Announcements, Calendar, Meetings, Polls, Interviews, Committees**, plus **Tickets** for the person who sent one. Messages carries one too, from a different mechanism (below), and **Reports / Oversight** carries one that is not a tab count at all (see below).
 
-Visiting a tab clears its badge — with three deliberate exceptions: **Meetings**, the **Calendar's pending-RSVP count**, and **Committees**. The tab you are currently looking at never shows one, again except those three.
+Files & Photos used to badge and no longer does; it was removed in August 2026 because neither a new document nor a new photo is something anybody needed to be told about the moment it appeared.
+
+Visiting a tab clears its badge — with these deliberate exceptions: **Meetings**, the **Calendar's pending-RSVP count**, **Committees**, and the **report and ticket queues**. The tab you are currently looking at never shows one, again except those.
 
 ### How "new" is decided
 
@@ -67,6 +69,36 @@ A committee event badges **both** Calendar and Committees; a committee announcem
 ### Messages is different, on purpose
 
 Messages keeps its own unread count from real per-message read receipts. That is a genuinely per-item question ("which messages have I read"), it already worked, and folding it into a per-tab cursor would have made it worse.
+
+### The report and ticket queues count what is still OPEN
+
+The badge on **Reports** (`/member/reports`, the judicial committee) and on **Oversight** (`/admin/oversight`, eboard) is not a cursor count and does not clear when the page is opened. It is the number of reports and tickets that are **still unresolved**.
+
+That is the whole point of it. A report or a ticket is *work*, not news. A cursor count would have cleared the first time anybody glanced at the page, hiding an unhandled report from the two people responsible for it — and conduct and attendance both carry real consequences here. Only closing an item clears its badge. The precedent is Meetings, which counts unanswered invitations for the same reason.
+
+What counts:
+
+- **Reports:** `status = 'open'`. `resolved` and `dismissed` are both endings, one agreeing and one declining.
+- **Tickets:** `status <> 'closed'`. **A ticket marked "in progress" still counts** — picking something up is an acknowledgement, not a resolution.
+
+The nav badge is the **sum** of the two, because each of those pages holds both queues as tabs; the split is shown on the tabs themselves.
+
+:::note One route each, and neither audience can reach the other's
+`proxy.ts` sends eboard to `/admin` and refuses everyone else, so the judicial committee — who are **not** eboard — need `/member/reports` to exist. Both surfaces mount the same `ModerationQueue` and `TicketQueue` components, and `badgeFor` in `PortalShell` resolves both hrefs with one rule. Two routes, one implementation.
+:::
+
+**Nothing that predated the badge appears in it.** Both counts have a fixed cutoff (`QUEUE_BADGE_SINCE` in `notificationCursorModel`), so items already open when this shipped never badge. It is deliberately a shared constant rather than a per-member cursor: a cursor advances on every visit, which would break the clear-on-close rule outright, and a judicial chair appointed next semester would see 0 while a real queue sat open.
+
+### A ticket's author is told when it is answered
+
+The other direction, and this one **is** an ordinary cursor count under the `tickets` key. When somebody's own ticket gets a reply, is closed, or changes status at all, their **Tickets** nav badge lights up, and opening the page clears it.
+
+Two things follow from how tickets are stored:
+
+- **An anonymous ticket can never badge anybody.** No author is recorded, so there is nobody to match. That is the stated cost of anonymity, printed on the form, not a gap to be worked around.
+- **A signed ticket whose author has since left badges nobody either.** `ON DELETE SET NULL` nulls `author_id` while `is_anonymous` stays `FALSE`, and a null never matches a member.
+
+This needed `tickets.updated_at` (migration `1789800000000`). The pre-existing `responded_at` was stamped only when response *text* was written, so closing a ticket with no reply moved no timestamp at all — and for a suggestion or a question, closing without a reply is the common case. Sending a ticket does not badge its own author: `created_at` and `updated_at` share the insert's clock, and the count requires `updated_at > created_at`.
 
 ### Meetings counts unanswered invitations, not new meetings
 

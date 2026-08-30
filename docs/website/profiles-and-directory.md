@@ -77,6 +77,32 @@ That is enforced by the SELECT lists in `models/memberModel.js` — `findPublicR
 
 `components/profile/PronounsField.jsx` is shared by the member's own form and eboard's `AdminEditProfileModal`, for the same reason `LinksField` is: the admin write is **whole-row**, and both forms build their body with the shared `buildProfilePayload`. A modal that rendered no pronouns input would still send `pronouns: null` and blank the member's answer every time eboard corrected their major — which is exactly the bug `links` once had.
 
+## Birthdays
+
+The directory profile panel shows a member's birthday as **month and day only** — "March 14", never a year.
+
+That is not a display choice. `GET /members` returns a `birthday` field formatted as `MM-DD` **in SQL**, and the raw `dob` column is not in the projection at all:
+
+```sql
+TO_CHAR(dob, 'MM-DD') AS birthday
+```
+
+:::warning The year never leaves Postgres, and that is the whole design
+The chapter wanted birthdays so people can say happy birthday. A full date of birth published to ~100 members also publishes **everyone's age**, which nobody asked for and which a member cannot take back once it has been on a page.
+
+Formatting in the query rather than in the client means no consumer of `/members` can recover the year — not the website, not the iOS app, not anything written later. Adding `dob` to that `SELECT` would undo it in one word, so a test asserts against the real query source rather than trusting this paragraph.
+:::
+
+:::note Formatted in SQL, not in JavaScript — this is a correctness bug, not a preference
+`dob` is a `DATE`. Handing `"1998-03-14"` to `new Date()` parses it as **UTC midnight**, which renders as the 13th in any negative-offset timezone, including this chapter's. Everyone's birthday would show one day early, and a January 1st birthday would appear as December 31st.
+
+`TO_CHAR` never converts a timezone, so the day cannot shift. `formatBirthday` on the website builds the label from the month and day as separate numbers for the same reason — it never constructs a `Date` from the string. This is the same trap `services/validate.js` documents as `dateOnly`.
+:::
+
+**Absent for most of the chapter.** `dob` is optional on the profile form, so `birthday` is `null` for anyone who never filled it in and the row simply does not render.
+
+**Portal only.** The public roster queries (`findPublicRoster`, `findPublicRosterMember`) select neither `dob` nor `birthday`, exactly as they omit `pronouns`. `/members-list` is unauthenticated and indexable; a birthday behind the portal login is a different thing from one on the open internet.
+
 ## Traits
 
 Eboard can type up to six short **captions** onto any member: *Pledge Chair*, *Fintech*, *Atlanta, GA*. Each is one plain string, up to 80 characters.

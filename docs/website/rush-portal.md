@@ -85,6 +85,45 @@ Same arrangement as `about_me` and `doing_now`: the columns are on every `users`
 
 `NUMERIC` comes back from node-postgres as text, so `gpa` is `"3.75"` everywhere, never `3.75`. The validator returns a string on the way in too so the read and the write agree. A third decimal place is rejected rather than rounded, because Postgres silently stores `3.756` as `3.76`. The ceiling is **5**, not 4 — a first-semester rushee answers with a weighted secondary-school GPA.
 
+## Resumes
+
+A rushee uploads their own resume from `/rushee/settings`, in a card of its own beneath the interest form. The pledge committee and eboard read it from the per-rushee profile, where **View resume** opens it in a pop-up rather than a new tab.
+
+**PDF and Word are both accepted, and they do not behave the same way on the way back out.** A browser can render a PDF inline, so it appears inside the modal; no browser can render `.doc` or `.docx`, so those are sent as a download and the modal says so instead of showing an empty frame. That was a deliberate trade: taking resumes in the format people actually have, at the cost of one file type that cannot be previewed.
+
+| | |
+|---|---|
+| Upload / replace / remove | `PUT` and `DELETE /resumes/me` |
+| Read | `GET /resumes/:id` — the rushee themselves, eboard, or the pledge committee |
+| Limit | **10 MB**, the smallest cap of any upload here |
+| Storage | ktp-api's own disk, `uploads/resumes` |
+
+### Four columns on `users`, not a table
+
+A person has exactly one resume, the same shape `minors`, `gpa` and `heard_from` already take. `resume_path` is the random on-disk name and `resume_filename` is what the rushee called it — the first finds the bytes, the second names the download, and **`resume_path` is deliberately absent from every client-facing projection**. Only the streaming handler reads it.
+
+:::warning Deleting the row is only half of deleting a resume
+A resume is the single most identifying document this system stores: name, phone, email and history in one file. Nulling the columns forgets **where** the file is without removing it, which leaves the bytes on disk and permanently unreachable.
+
+So every path that clears the columns — `setResume` replacing an old file, `clearResume`, and `anonymize` on account deletion — returns the previous path so the caller can unlink it. Each does that with a `WITH previous AS (...)` CTE, because a plain `RETURNING` hands back the `NULL` that was just written, which is exactly the value that cannot find the file.
+:::
+
+### Why uploading is not gated on being a rushee
+
+Anyone signed in may upload their own resume; only the rushee profile puts a button in front of one. Gating the write on the rush group would take the ability away at a moment nobody controls — someone accepted into a pledge class **keeps** the rush group in Authentik until an admin removes it, and loses it on an unrelated admin's schedule, partway through rush.
+
+The card on the settings page is keyed on `member_group === 'rush'` rather than on the session groups that `ProfileForm`'s own `isRushee` uses. The two answer different questions: `ProfileForm` asks whether to show the rushee version of the form, this asks whether the pledge committee will be able to open the file — and that is decided by `userModel.findRusheeById`, which filters on `member_group = 'rush'`.
+
+### These bytes come from outside the chapter
+
+A rushee is not yet a member, and the website proxies their upload back under **its own origin**. Two headers are set by ktp-api and forwarded by `app/api/resumes/[id]/route.js`:
+
+- `X-Content-Type-Options: nosniff` — stops a browser second-guessing the declared type
+- `Content-Security-Policy: sandbox` — makes the document inert, which matters because a PDF can carry its own scripting
+
+The stored `resume_mime` is handed straight to a `Content-Type` header, so a `CHECK` constraint restricts it to the three accepted values as well as the uploader's `fileFilter`. Dropping either header in the proxy would undo the protection in the one place it matters most.
+
+
 ## Rushee Data: the table that replaced the response sheet
 
 One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pages:
