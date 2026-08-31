@@ -102,6 +102,49 @@ The ordering changed with it: the public list is sorted by **publication date**,
 An id encodes its own publish time, so a hardcoded one gets older every day the suite runs. `test/linkedinPosts.test.js` has `idPostedDaysAgo()` for exactly this — two tests were quietly six weeks away from failing for reasons unrelated to the code they cover.
 :::
 
+## A nightly check that posts still exist
+
+An author can delete or restrict a post long after we ingested it. The embed then renders LinkedIn's *"Sign in or join now to see ...'s post / This post is unavailable"* wall, which looks like a bug in our homepage.
+
+**This cannot be detected in the browser.** The embed is a cross-origin iframe, so nothing on our page can read what is inside it. The check has to be a server-side probe, and its result has to be stored.
+
+`services/linkedinAvailability.js` runs once every 24 hours, following `startReminderWorker`'s exact shape — a `running` guard, a `void ... .catch()` wrapper so a rejection cannot crash the API, and `timer.unref()` so a script or test run is not held open by it.
+
+### How a dead post is recognised
+
+Two signals, **both** required:
+
+| | Status | Body |
+|---|---|---|
+| Good post | `200` | contains `attributed-text` |
+| Missing post | `404` | does not |
+
+Verified against real chapter posts. Status alone would miss the *restricted* case, which answers `200` with a sign-in wall; the body marker alone would trust a page that errored.
+
+:::warning A network failure is NOT an answer
+A timeout, a DNS blip, or LinkedIn refusing our datacenter IP says nothing about whether the **post** exists. Treating that as "unavailable" would hide every post on the site the first time the network hiccupped.
+
+The probe returns `available: null` for that case and the row is left **completely** untouched — including `last_checked_at`, so the real check happens on the next run rather than a day later.
+:::
+
+:::warning The run is capped, and that cap is load-bearing
+`MAX_PER_RUN = 40`, with 1.5s between requests. There are already ~173 posts and the number only grows. Firing all of them at LinkedIn in a burst from one datacenter IP is how the address gets rate-limited — at which point every post looks unavailable and the worker hides the entire homepage.
+
+Oldest-checked-first means the backlog still drains, just over several nights. The worker also does **not** run on boot, unlike the reminder worker: a crash-looping API would otherwise hammer LinkedIn on every restart.
+:::
+
+### What happens to a post it finds missing
+
+`unavailable_at` is set and the public query filters it out — the same read-filter shape as the six-month age-off.
+
+:::note `unavailable_at` is deliberately separate from `is_published`
+They answer different questions: `is_published` is "eboard chose to hide this", `unavailable_at` is "LinkedIn no longer serves this". Collapsing them would make a false positive look like a human decision, and would make un-hiding ambiguous — did somebody restore it, or did the checker change its mind?
+:::
+
+**Posts already marked unavailable stay in the queue**, so an author who un-restricts a post brings it back to the site with nobody intervening. Only posts eboard hid are excluded from re-checking, since that is a human decision the checker has no business revisiting.
+
+The admin pill is therefore **four states**, in precedence order: **Hidden** (a person did it) → **Unavailable** (LinkedIn pulled it) → **Aged out** (over six months) → **Live**.
+
 ## Moderating posts
 
 **Admin Panel → Homepage Media → LinkedIn**, eboard only. Every ingested post, published or not, with a show/hide switch.
