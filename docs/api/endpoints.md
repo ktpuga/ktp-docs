@@ -1190,6 +1190,8 @@ Chapter LinkedIn posts, ingested from a Discord channel by the [LinkedIn embed b
 
 **Public, no auth.** Published posts, newest first. `?limit=` is accepted and **capped at 50** in the model, defaulting to 24 — this is the one unauthenticated route here, and an unbounded limit would be a table scan anybody on the internet could ask for.
 
+**Posts older than six months are excluded**, measured from the LinkedIn post's own publication date, which is decoded from its id (a snowflake whose high bits are a Unix ms timestamp). Nothing is deleted or unpublished to achieve that — it is a filter, so widening the window restores everything. Ordering is by publication date, not `created_at`.
+
 Returns the public shape only: `id`, `linkedin_post_id`, `linkedin_urn`, `source_url`, `embed_url`, `created_at`. **`discord_message_id` and `submitted_by_discord_id` are deliberately withheld** — a visitor reading the homepage has no business knowing which member posted a link in Discord.
 
 ### `POST /linkedin-posts/ingest`
@@ -1214,7 +1216,7 @@ They are 19 digits, past `Number.MAX_SAFE_INTEGER`. One `parseInt` silently corr
 
 ### `GET /linkedin-posts/all`
 
-**Eboard.** Every post including unpublished ones, plus the Discord trace the public shape withholds.
+**Eboard.** Every post including unpublished ones, plus the Discord trace the public shape withholds. Also returns **`posted_at`** (the decoded publication date) and **`is_too_old`** — without the latter the panel would label an aged-out post "Live" while the site does not show it.
 
 ### `PUT /linkedin-posts/:id`
 

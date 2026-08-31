@@ -118,6 +118,10 @@ systemctl restart linkedin-embed-bot
 
 | Symptom | Cause |
 |---|---|
+| `status=200/CHDIR` | The checkout is not at `/opt/linkedin-embed-bot`. See below — do not fix this by repointing the unit |
+| `Cannot find module 'dotenv'` | `npm ci` was never run in the checkout |
+| `node --version` says 18 after installing | The NodeSource repo did not apply. `apt purge -y nodejs`, re-run the setup script, install again |
+| Refuses to start after several failures | `StartLimitBurst` tripped. `systemctl reset-failed linkedin-embed-bot` |
 | Exits immediately, "Missing environment variables" | `.env` absent or unreadable by `ktpbot` — check `chown` |
 | "API_URL and LINKEDIN_BOT_SECRET must be configured together" | Exactly one of the two is set |
 | Prints embed URLs but nothing reaches the site | `API ingestion disabled` in the startup log, i.e. no `API_URL` |
@@ -128,6 +132,15 @@ systemctl restart linkedin-embed-bot
 | Nothing on the homepage even though posts ingested | Check the posts are published: Admin → Homepage Media → LinkedIn |
 
 Logs are in the journal: `journalctl -u linkedin-embed-bot -n 200 --no-pager`.
+
+:::warning It must live in `/opt`, and `/root` will not work even if you repoint the unit
+Cloning to `/root/linkedin-embed-bot` and changing `WorkingDirectory` looks like it should work. It cannot, for two independent reasons:
+
+- The unit sets **`ProtectHome=true`**, which makes `/home`, `/root` and `/run/user` inaccessible to the service. systemd fails the `chdir` before Node ever starts, reporting `status=200/CHDIR`.
+- `/root` is mode `700`, so the unprivileged `ktpbot` user could not read the code regardless.
+
+`mv /root/linkedin-embed-bot /opt/linkedin-embed-bot` preserves `.git` and `.env`, so a misplaced clone is a one-command fix. Re-run the `chown`/`chmod` afterwards.
+:::
 
 ## Secret rotation
 

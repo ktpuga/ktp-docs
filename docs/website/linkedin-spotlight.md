@@ -27,7 +27,7 @@ Removal runs the same way backwards: **delete the Discord message and the post c
 
 ## The bot
 
-Lives at `GitHub/Personal Projects/Linkedin Embed Bot` — **a fifth folder, outside the four repos, and not a git repository.** Node 20+, `discord.js`, no framework.
+A **fifth repo**, outside the other four: `yashverms32/linkedin-embed-bot` (private), working copy at `GitHub/Personal Projects/Linkedin Embed Bot`. Node 20+, `discord.js`, no framework. Runs on its own LXC under systemd — see [LinkedIn Embed Bot](../kronos/linkedin-bot.md) for the deployment.
 
 It scans the channel's whole history on startup as well as watching for new messages. That is safe to repeat because the API upserts on `linkedin_urn`; it is not idempotence in the bot itself.
 
@@ -66,6 +66,41 @@ Those eight entries are the posts that were hardcoded before this table existed,
 **An empty table is not a reason to fall back.** If the API answers with zero posts, the section renders empty — returning the fallback there would resurrect the seeded eight after an officer had deliberately hidden every one of them, which reads as the admin panel not working.
 
 `rotateHourly(links, count, now)` advances the starting offset every hour, so a chapter with 24 posts still shows a different three on the homepage through the day. It takes the list as an argument rather than reading a constant, which is what lets the same rotation run over database rows and over the fallback.
+
+## Posts age off the site after six months
+
+A post stops appearing on the homepage and `/spotlight` once **the LinkedIn post itself** is more than six months old.
+
+**Nothing is deleted and nothing is unpublished.** It is a filter on the read query, so the row is untouched, eboard still sees it in the admin tab marked **Aged out**, and widening the window is a one-character edit in `MAX_AGE_MONTHS` that brings everything straight back.
+
+That was chosen over a scheduled job deliberately. A job writing `is_published = FALSE` would have been irreversible, and it would have been undone anyway the first time anyone set `SCAN_EXISTING_MESSAGES=true` — the bot would re-ingest the very posts it had just culled.
+
+### Where the date comes from
+
+A LinkedIn post id is a snowflake: the high bits are a Unix millisecond timestamp. Shifting right 22 bits recovers when the post was published, straight out of an id already stored on the row.
+
+```sql
+to_timestamp(floor(linkedin_post_id::numeric / 4194304) / 1000)
+```
+
+Verified against real chapter posts — `7445488019756826624` decodes to `2026-04-02T15:11:14.388Z`, and the same arithmetic in JavaScript agrees to the millisecond.
+
+:::warning The two obvious date columns are both the wrong ones
+- **`created_at` is when the bot ingested the post.** The entire 165-message backlog was ingested in one afternoon, so every row shares a `created_at` and none of them look old however old the content is. A rule built on it would have removed nothing until March 2027.
+- **`discord_message_id` decodes to when somebody pasted the link into Discord**, which is also not the post's age — a two-year-old article shared today would count as brand new.
+
+Only the LinkedIn id knows when the post was actually published.
+:::
+
+:::note `numeric`, not `bigint`
+The `CHECK` constraint permits up to 32 digits and `bigint` tops out at 19, so a longer id would raise "value out of range". Real ids are 19 digits; `numeric` simply cannot overflow.
+:::
+
+The ordering changed with it: the public list is sorted by **publication date**, not `created_at`. Sorting the backlog by ingestion time put a year of posts in essentially arbitrary order, since they all share one timestamp.
+
+:::warning Tests that assert a post is publicly visible must generate their ids from the clock
+An id encodes its own publish time, so a hardcoded one gets older every day the suite runs. `test/linkedinPosts.test.js` has `idPostedDaysAgo()` for exactly this — two tests were quietly six weeks away from failing for reasons unrelated to the code they cover.
+:::
 
 ## Moderating posts
 
