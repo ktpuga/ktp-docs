@@ -528,6 +528,14 @@ This is deliberately broader than `checkEventPermission`, which restricts a chai
 
 **Eboard, cabinet or event creator.** Returns `{ finalizedAt, records }` — the event's **materialised roster**, one record per expected attendee. Each record carries `user_id`, the frozen `display_name` and `member_group`, `status`, `checked_in_at`, `marked_by`, plus `username` and `profile_picture_asset_id` joined live from `users` for the avatar. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
 
+:::info Records are grouped by status, then by last name
+The order is **present, excused, not marked, absent**, and alphabetical within each group. Absent sits last rather than beside "not marked" deliberately: absent is a decision somebody made, unmarked is a decision nobody has made yet, so the rows still needing a human stay above the settled ones.
+
+Ordered in SQL rather than in the client, because the iOS app reads this same endpoint and the portal treats the list as server-ordered — it uses the array index as a key tiebreaker for deleted accounts, which have no `user_id` to key on.
+
+A consequence to expect rather than to fix: the portal re-polls every few seconds, so during QR check-in rows **move as people scan themselves in**.
+:::
+
 :::warning The response is an object, not an array
 It was a bare array until 2026-08-09. A client doing `Array.isArray(data) ? data : []` on the new shape gets `false` and renders an **empty roster with no error** — which is exactly what happened to the portal. Unwrap `data.records`.
 :::
@@ -828,18 +836,30 @@ Read access, not write: the whole pledge committee watches the meeting, so they 
 
 ### `GET /rush-data/:id`
 
-One rushee's profile: the interest form, their interview, and the booking id the notes panel is addressed by.
+One rushee's profile: the interest form, their interview, the rush events they turned up to, and the booking id the notes panel is addressed by.
 
 ```json
 { "rushee": { "…": "…" },
   "interview": { "booking_id": "…", "schedule_id": "…", "schedule_title": "…",
                  "startDate": "…", "endDate": "…", "location": null, "interviewers": [] },
   "presentation": { "body": "…", "updated_by_name": "…", "updated_at": "…" },
+  "attended_events": [
+    { "id": "12", "title": "Info Session", "startDate": "…", "endDate": "…",
+      "location": null, "checkedInAt": "…" }
+  ],
   "can_view_notes": true,
   "can_edit_presentation": false }
 ```
 
 `interview` and `presentation` are each **`null` when absent, and neither absence is an error.** A rushee with no booking still gets a profile with the interview section simply missing — the chapter's rule is that no interview means no bid, and that is a fact worth stating rather than a page worth hiding.
+
+`attended_events` is **always an array**, empty rather than absent, and is ordered oldest first so it reads as the rush timeline it is.
+
+:::info `attended_events` is `status = 'present'` only, and an empty list is ambiguous
+Excused, absent and never-marked rows all exist in `event_attendance` and none of them appear here — the panel answers "which events did they attend", so widening the filter would change what it claims without changing its heading.
+
+The consequence worth designing around: **an empty list can mean nobody took attendance, not that the rushee came to nothing.** A rushee only lands on a roster for an event whose `audience` includes `rush`, and somebody still has to mark them. The portal's empty state says both, because on decision night "attended nothing" is a damaging thing to imply when the real cause was an officer never opening the roster.
+:::
 
 **The notes themselves are not in this response.** The website mounts the existing `InterviewNotes` component, addressed by `booking_id`, which already handles the access tiers and the edit rules. Duplicating them here would mean two projections of the most sensitive table in the product — which is why **no candidate-addressed notes endpoint was built and none is needed.**
 

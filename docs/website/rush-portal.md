@@ -135,6 +135,18 @@ One component, `components/rush/RushInterestTable.jsx`, rendered by two thin pag
 
 Both routes now carry a **Presentation** tab beside the table (see [Decision night](./interviews.md#the-presentation-write-up)), and a **per-rushee profile** at `/admin/rushees/[id]` and `/member/rush-data/[id]` — same two-routes-one-component shape, reached by clicking any row of the table.
 
+### Events attended
+
+The profile carries an **Events attended** card, directly under the interview because it answers the same question in the same breath: did this person actually show up. Both are things the chapter observed, unlike the interest form and the resume below them, which are what the rushee said about themselves.
+
+It lists only events the rushee was marked **present** at, oldest first. Excused, absent and never-marked rows exist in `event_attendance` and are deliberately not shown — see [`GET /rush-data/:id`](../api/endpoints.md#get-rush-dataid).
+
+:::warning An empty list does not mean they came to nothing
+A rushee only lands on an attendance roster for an event whose audience includes `rush`, and somebody still has to take attendance. So an empty card can equally mean **no officer ever opened the roster**.
+
+The empty state says exactly that, in those words, rather than showing a bare "none". On decision night a blank attendance panel is read as evidence about the rushee, and it is the one place where the system's own gap looks identical to the candidate's.
+:::
+
 **Two routes rather than one, because no single route can serve both.** `proxy.ts` hard-gates `/admin` to the `eboard` group, and it redirects an eboard-only account *away* from `/member`. It also cannot help here at all: the rule involves committee membership, which lives in Postgres and deliberately never in the JWT, so the proxy has nothing to check.
 
 **Neither route is the access boundary.** Any member of the member portal can type `/member/rush-data`; the API answers `403` and the component renders the refusal. The nav entry is hidden by `useRushDataAccess`, which asks `GET /rush-data/access` — the same shape as the Interviews tab, so an entry cannot appear for someone the endpoint would then refuse.
