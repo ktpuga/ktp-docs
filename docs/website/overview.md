@@ -87,6 +87,26 @@ Events can opt into QR-code attendance tracking. The flow:
 
 The check-in window is the event's own start-to-end time plus a **30-minute grace period** — scanning outside it is rejected, as is a stale or wrong token.
 
+### Filtering the roster, and the CSV
+
+The roster is **grouped by status** — present, excused, not marked, absent — alphabetical within each group, ordered in SQL so every client agrees. Rows therefore move as people scan themselves in, because the pane re-polls every few seconds.
+
+Above the counts is a row of **group pills**, multi-select, showing only the groups actually on that roster: an event targeted at pledges never offers an Alumni pill, since filtering to zero reads as "no alumni came" rather than "no alumni were invited". Filtering runs in the browser over the roster already fetched, so it costs no request.
+
+**Export CSV** downloads the roster as `Name, Group, Status, Checked In, Recorded`. `Recorded` is `Self (QR)`, `Manual`, or blank for a row nobody has touched — three distinguishable values, because a "Marked By" column would be blank both for a manual mark (the API returns `marked_by` as a bare id, with no name to print) and for an unmarked row, which is the one distinction the column exists to make.
+
+Names come from the **frozen** `display_name`, so a member whose account was later deleted still exports under the name that was on the roster rather than a blank cell.
+
+:::warning A filtered roster's counts describe the filter, not the event
+Turn a pill on and every number in the counts row — including **"N expected"** — describes only the selected groups. The export does the same, and names the groups in its filename.
+
+That is deliberate ("how many pledges missed this" is the question worth asking), and it is also the one way this feature does damage: `12 expected` copied into meeting minutes as the event's turnout. So whenever a filter is on, the pane states the filter and the full roster size directly beneath the counts, and the export filename carries the groups. **Do not remove either.** They are what make the narrowed numbers safe to read.
+:::
+
+The filter is **cleared when you switch events**. Carried across, it would silently hide people on the next roster, and a pill for a group nobody on it belongs to is not rendered at all — so nothing on screen would reveal that a filter was still on.
+
+`member_group` on each row is the value **frozen when the roster was materialised**, not a live lookup. Filtering a spring event to Pledges therefore shows who was a pledge *that night*, not who is still one now the class has been initiated.
+
 Regular members have no attendance UI beyond the confirmation screen after a scan. The Attendance tab appears only for **chairs** (in `/member`) and **eboard** (in `/admin`). Alumni and pledges don't have it at all.
 
 See [API: Attendance](../api/endpoints.md#attendance) for the endpoints.
