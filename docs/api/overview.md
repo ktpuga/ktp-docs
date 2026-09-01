@@ -184,7 +184,7 @@ Gained several columns beyond the original bare title/date/location shape:
 
 **The event's materialised roster**, not a log of marks: one row per *expected* attendee, written by `attendanceModel.syncRoster`, with `status` (`present` / `excused` / `absent`) left **null** until somebody accounts for that person. Also holds `checked_in_at`, `marked_by`, and the frozen `display_name` / `member_group`.
 
-A **null `marked_by` means the member self-checked-in** by scanning the QR code; a populated one means an organizer set the status manually. Self check-in validates the token and that the current time falls inside the event window plus a 30-minute grace period.
+A **null `marked_by` means the member self-checked-in** by scanning the QR code; a populated one means an organizer set the status manually. Self check-in validates the rotating code and that the current time falls inside the check-in window, which opens 30 minutes before the event starts and closes 30 minutes after it ends.
 
 :::warning `display_name` and `member_group` are frozen copies — don't "normalise" them away
 They look like denormalised duplicates of `users`. They are the point of the table. **Pledges are initiated mid-semester**, so reading the group live would relabel — or silently drop — every pledge on every past event the day their class becomes active, rewriting history. `display_name` additionally keeps a record readable after the person deletes their account.

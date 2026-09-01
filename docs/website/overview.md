@@ -85,7 +85,25 @@ Events can opt into QR-code attendance tracking. The flow:
 3. Members scan it while signed in, landing on `/checkin/[eventId]/[token]`, which records them as present.
 4. The organizer can view who checked in and manually correct anyone's status to present, excused, or absent.
 
-The check-in window is the event's own start-to-end time plus a **30-minute grace period** — scanning outside it is rejected, as is a stale or wrong token.
+The check-in window opens **30 minutes before the event starts** and closes **30 minutes after it ends** — scanning outside it is rejected, as is a stale or wrong code. It opens early because people queue before an event begins.
+
+The QR itself carries a code that **rotates every 10 seconds**, so photographing the board is worthless; the server accepts the current period and the one before it, giving a scan 10–20 seconds to land.
+
+### Scanning while signed out
+
+Attendance is recorded against an account, so a scan by someone not signed in cannot count. That page now sends them to `/login?next=/checkin/…` and **brings them back to the check-in page afterwards** — previously the Sign in link dropped the destination and left them on their portal home, with nothing to suggest the check-in had not happened.
+
+:::note They still scan once more, and that is not a bug
+An Authentik round-trip takes longer than the code lives, so by the time they return the code in the URL has rotated. The returning page says so and points at the live code; the second scan is instant because they are signed in by then.
+
+One scan end-to-end would mean the server capturing the scan *before* login — validating the code while fresh and holding it in a short-lived cookie to be claimed afterwards. That is a real bearer credential with a lifetime, and it was judged not worth introducing for a case that only affects people whose session has lapsed.
+:::
+
+:::danger `next` is an allowlist, never a sanitiser
+`lib/next-path.js` matches the one URL shape this feature needs (`/checkin/<id>/<code>`) and returns null for everything else, falling back to normal portal routing.
+
+A post-login redirect target is a textbook open-redirect hole: `/login?next=https://evil.example/login` would produce a convincing phishing page that the chapter's own domain sent you to, moments after a genuine sign-in. Denylisting `//`, `\\` and `://` is the usual approach and it leaks, because browsers disagree about what counts as a scheme. **Widening this means adding a pattern with a reason, not loosening the regex.**
+:::
 
 ### Filtering the roster, and the CSV
 

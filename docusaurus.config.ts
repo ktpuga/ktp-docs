@@ -25,7 +25,7 @@ const config: Config = {
   organizationName: 'ktpuga', // Usually your GitHub org/user name.
   projectName: 'ktp-docs', // Usually your repo name.
 
-  // These docs sit behind the OAuth proxy, so a crawler can't read them — but
+  // These docs sit behind the OAuth proxy, so a crawler can't read them -- but
   // a proxy is an access control, not an indexing instruction. Anything that
   // ever reached a crawler (a misconfiguration, a window before the proxy went
   // up, a page fetched by a logged-in browser extension) could otherwise leave
@@ -33,8 +33,8 @@ const config: Config = {
   // <meta name="robots" content="noindex, nofollow"> on every page; see also
   // static/robots.txt, which covers crawlers that never render the HTML.
   //
-  // These docs describe the authorization model in detail — group gates,
-  // enrollment flow, which endpoints 404 rather than 403 and why — which is
+  // These docs describe the authorization model in detail -- group gates,
+  // enrollment flow, which endpoints 404 rather than 403 and why -- which is
   // exactly the kind of thing that shouldn't be searchable.
   noIndex: true,
 

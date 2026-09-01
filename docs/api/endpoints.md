@@ -520,7 +520,7 @@ This is deliberately broader than `checkEventPermission`, which restricts a chai
 
 **Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs }` — encode as a QR pointing at `<site>/checkin/:eventId/:code`.
 
-**The code rotates every 30 seconds.** Callers must re-fetch just after `expiresAt`; `AttendancePage.jsx` reschedules itself from that field and only polls while the QR overlay is actually open.
+**The code rotates every 10 seconds.** Callers must re-fetch just after `expiresAt`; `AttendancePage.jsx` reschedules itself from that field and only polls while the QR overlay is actually open. Read the interval from `expiresAt` (or `periodMs`) rather than hardcoding it — the period has already changed once, and a client with 30 seconds baked in would sit on a dead code for 20 of them.
 
 400s if attendance isn't enabled for the event.
 
@@ -592,7 +592,7 @@ The accepted cost of a manual finalise is that an event nobody finalises keeps d
 
 **Any member.** Self check-in, hit after scanning the QR while signed in.
 
-The path param is a **rotating code**, not the stored token. It must match the current 30-second period or the one immediately before it (so it is valid for between 30 and 60 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall between the event's start and end plus a **30-minute grace period**.
+The path param is a **rotating code**, not the stored token. It must match the current 10-second period or the one immediately before it (so it is valid for between 10 and 20 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall inside the check-in window: from **30 minutes before the event's start** to **30 minutes after its end**.
 
 403s outside that window, on a stale code, or on the raw `attendance_token`.
 
