@@ -102,13 +102,23 @@ The ordering changed with it: the public list is sorted by **publication date**,
 An id encodes its own publish time, so a hardcoded one gets older every day the suite runs. `test/linkedinPosts.test.js` has `idPostedDaysAgo()` for exactly this — two tests were quietly six weeks away from failing for reasons unrelated to the code they cover.
 :::
 
-## A nightly check that posts still exist
+## A scheduled check that posts still exist
 
 An author can delete or restrict a post long after we ingested it. The embed then renders LinkedIn's *"Sign in or join now to see ...'s post / This post is unavailable"* wall, which looks like a bug in our homepage.
 
 **This cannot be detected in the browser.** The embed is a cross-origin iframe, so nothing on our page can read what is inside it. The check has to be a server-side probe, and its result has to be stored.
 
-`services/linkedinAvailability.js` runs once every 24 hours, following `startReminderWorker`'s exact shape — a `running` guard, a `void ... .catch()` wrapper so a rejection cannot crash the API, and `timer.unref()` so a script or test run is not held open by it.
+`services/linkedinAvailability.js` runs **every six hours, with the first pass ten minutes after boot**, following `startReminderWorker`'s shape — a `running` guard, a `void ... .catch()` wrapper so a rejection cannot crash the API, and `timer.unref()` so a script or test run is not held open by it.
+
+:::danger It shipped as a 24-hour interval with no boot run, and in that form it NEVER ran
+The original reasoning was sound in isolation: this worker makes outbound requests to a third party, so don't let a crash-looping API hammer LinkedIn on every restart — wait a full interval before the first pass.
+
+What it missed is that **the API container is rebuilt on every push, and ktp-api ships several times on a normal day.** Every deploy reset the timer, so it never reached 24 hours. The probe did not run once in production. A post that LinkedIn had restricted sat on the public homepage serving a sign-in wall, and the admin panel showed it as **Live**, because `unavailable_at` was NULL on every row.
+
+Nothing logged anything either: `checkBatch` only prints when `summary.checked > 0`, so a worker that never woke up was indistinguishable from one with nothing to do.
+
+**The lesson generalises to any scheduled work in this API: an interval longer than the deploy cadence is an interval that never elapses.** The crash-loop protection now comes from the ten-minute boot delay, which a container restarting faster than that never reaches. It never needed to come from the interval.
+:::
 
 ### How a dead post is recognised
 
@@ -130,7 +140,13 @@ The probe returns `available: null` for that case and the row is left **complete
 :::warning The run is capped, and that cap is load-bearing
 `MAX_PER_RUN = 40`, with 1.5s between requests. There are already ~173 posts and the number only grows. Firing all of them at LinkedIn in a burst from one datacenter IP is how the address gets rate-limited — at which point every post looks unavailable and the worker hides the entire homepage.
 
-Oldest-checked-first means the backlog still drains, just over several nights. The worker also does **not** run on boot, unlike the reminder worker: a crash-looping API would otherwise hammer LinkedIn on every restart.
+Oldest-checked-first means the backlog still drains, just over several runs.
+:::
+
+:::note What actually bounds our request rate is a column, not the timer
+`STALE_AFTER_MS` (20 hours) is checked in SQL by `findDueForCheck`, so a run that happens sooner simply finds nothing due and makes **no** outbound requests at all.
+
+That is why moving from 24 hours to six was free: it costs no extra LinkedIn traffic per post, and unlike a `setInterval`, a redeploy cannot reset it. Schedule state that matters belongs in Postgres.
 :::
 
 ### What happens to a post it finds missing
@@ -144,6 +160,22 @@ They answer different questions: `is_published` is "eboard chose to hide this", 
 **Posts already marked unavailable stay in the queue**, so an author who un-restricts a post brings it back to the site with nobody intervening. Only posts eboard hid are excluded from re-checking, since that is a human decision the checker has no business revisiting.
 
 The admin pill is therefore **four states**, in precedence order: **Hidden** (a person did it) → **Unavailable** (LinkedIn pulled it) → **Aged out** (over six months) → **Live**.
+
+### "Live" and "checked" are different claims, and the panel says both
+
+Each row also carries an availability line under its URN, separate from the pill: **Checked \<date\>**, **Gone from LinkedIn since \<date\>**, or **Never checked** in amber. A count of unchecked posts sits above the list.
+
+:::warning A row that has never been probed must not read as a clean bill of health
+This distinction exists because collapsing it is what hid the dead worker for a week. The pill answers *"is this on the site"*; the availability line answers *"do we actually know whether LinkedIn still serves it"*. While every row was unchecked, every pill said **Live** and the summary said **0 unavailable** — which an officer reads as "everything is fine" when it actually meant "nobody has looked".
+:::
+
+### Checking on demand
+
+**Check against LinkedIn** in the LinkedIn tab runs the probe immediately rather than waiting for the worker: `POST /linkedin-posts/check-availability`, eboard only.
+
+It passes `staleAfterMs: 0`, so it re-probes regardless of freshness — a button that answers "checked 0" because the worker ran an hour ago reads as broken. It is capped at **15 posts**, not the worker's 40, because somebody is waiting on this response: at the 1.5s spacing, 40 would be a 60-second request and a reverse proxy would cut it off first. Ordering is oldest-checked-first, so pressing it again continues through the list.
+
+The response carries the refreshed admin list alongside the summary, so the panel re-renders from the run it just triggered rather than from a list that predates it.
 
 ## Moderating posts
 

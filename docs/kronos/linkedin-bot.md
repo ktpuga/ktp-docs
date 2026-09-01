@@ -130,8 +130,13 @@ systemctl restart linkedin-embed-bot
 | Finds no links in a channel that has them | Message Content Intent is off in the Developer Portal |
 | Deleting a Discord message leaves the post up | Check `Partials.Message` is in the client config — without it discord.js drops delete events for uncached messages |
 | Nothing on the homepage even though posts ingested | Check the posts are published: Admin → Homepage Media → LinkedIn |
+| A post on the site shows LinkedIn's *"Sign in or join now to see ...'s post"* wall | **Not the bot.** The author deleted or restricted it after we ingested it. The API's availability worker is meant to catch this; press **Check against LinkedIn** in Admin → Homepage Media → LinkedIn to do it now. See [the availability check](../website/linkedin-spotlight.md#a-scheduled-check-that-posts-still-exist) |
 
 Logs are in the journal: `journalctl -u linkedin-embed-bot -n 200 --no-pager`.
+
+:::note This bot is not involved in whether a post still renders
+It ingests links and unpublishes on Discord deletion, and that is all. Whether an already-ingested post still displays is decided by `ktp-api` on **LXC 119**, not by this container, so its journal will say nothing about it.
+:::
 
 :::warning It must live in `/opt`, and `/root` will not work even if you repoint the unit
 Cloning to `/root/linkedin-embed-bot` and changing `WorkingDirectory` looks like it should work. It cannot, for two independent reasons:

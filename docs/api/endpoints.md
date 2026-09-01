@@ -1236,7 +1236,13 @@ They are 19 digits, past `Number.MAX_SAFE_INTEGER`. One `parseInt` silently corr
 
 ### `GET /linkedin-posts/all`
 
-**Eboard.** Every post including unpublished ones, plus the Discord trace the public shape withholds. Also returns **`posted_at`** (the decoded publication date) and **`is_too_old`** — without the latter the panel would label an aged-out post "Live" while the site does not show it.
+**Eboard.** Every post including unpublished ones, plus the Discord trace the public shape withholds. Also returns **`posted_at`** (the decoded publication date), **`is_too_old`** — without which the panel would label an aged-out post "Live" while the site does not show it — and **`unavailable_at`** / **`last_checked_at`**, which the panel uses to distinguish "checked and healthy" from "never checked".
+
+### `POST /linkedin-posts/check-availability`
+
+**Eboard.** Runs the availability probe now instead of waiting for the scheduled worker, and returns `{ summary, posts }` where `posts` is the refreshed `/all` list.
+
+`POST` rather than `GET` because it has real side effects: it writes `last_checked_at` and can set or clear `unavailable_at`. It re-probes regardless of freshness (`staleAfterMs: 0`) and is capped at **15 posts**, deliberately below the worker's `MAX_PER_RUN` of 40, because a caller is waiting on the response and the 1.5s spacing would otherwise make it a 60-second request. See [Checking on demand](../website/linkedin-spotlight.md#checking-on-demand).
 
 ### `PUT /linkedin-posts/:id`
 
