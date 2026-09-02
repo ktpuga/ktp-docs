@@ -15,15 +15,63 @@ Every member is routed to one portal based on their Authentik group (see [Auth &
 | Group | Portal |
 |-------|--------|
 | `eboard` | `/admin` |
-| `chair`, `active`, `alumni` | `/member` |
+| `chair`, `active` | `/member` |
+| `alumni` | `/alumni` — restored 2026-09-02, see below |
 | `pledge` | `/pledge` |
 | `rush` | `/rushee` — see [Rush Portal](./rush-portal.md) |
 
+Order matters, and `alumni` is checked **after** `chair`/`active`: Authentik does not remove the old group when someone graduates, so an alumnus still marked active holds both and the more capable portal has to win.
+
 `proxy.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet. (This file was `middleware.ts` until the [Next.js 16 migration](./nextjs-16-migration.md) renamed it; the logic is unchanged.)
+
+### Portal preview: eboard viewing a portal as a member
+
+**Admin → Settings → View a portal as a member.** Eboard picks a group and lands in that portal seeing exactly what it sees — the same announcements, events, polls and documents, filtered to that audience.
+
+It works by **becoming** the group's QA account, not by simulating one. Those accounts already existed: migration `1784600000000` created one per `member_group` for the team to verify permissions with, and they are already hidden from the directory and the member-count stat. The website sends `X-View-As: <authentik_id>` and `ktp-api` swaps `req.user` for that account.
+
+:::tip Why impersonation rather than a "preview mode"
+Roughly thirty call sites filter on `req.user.groups`, and more read `req.user.authentik_id` for committee membership, RSVP state and audience overlap. A parallel "what would a pledge see" implementation would have to mirror all of it — and it would drift, which is exactly how the duplicated portals grew their `GROUP_ORDER` and `Promise.all` bugs.
+
+Becoming the account means every existing rule applies without being restated, so **the preview cannot disagree with the real thing**.
+:::
+
+Four gates, all server-side in `middleware/auth.js`, and the UI is not one of them:
+
+| # | Gate |
+|---|---|
+| 1 | A verified token — this runs after `verifyToken` |
+| 2 | The **real** caller must be `eboard` |
+| 3 | The target must have `is_test_account = true`, **checked in SQL** |
+| 4 | The request must be a `GET` or `HEAD` |
+
+:::danger Read-only is not about escalation
+Previewing only ever **narrows** access — eboard viewing as a pledge can reach strictly less than eboard. The reason writes are refused is **attribution**: without it, eboard could post an announcement, send a message or RSVP while wearing the QA account, and the audit trail would name the wrong actor. A preview that can write is not a preview.
+
+`req.realUser` keeps the genuine eboard identity for anything that needs to know who is actually there.
+:::
+
+Gate 3 is the one worth reading twice: the allowlist is a SQL predicate, not an id comparison in JavaScript, so **there is no request shape that aims the preview at a real member**. A real member's id and a nonexistent id return the *same* 404, so this cannot be used to probe whether a given `authentik_id` exists. `test/portalPreview.test.js` asserts all four gates.
+
+Leaving preview is client-side — the cookie is deleted and that is all. That is the advantage over signing in as the QA account directly: leaving cannot strand anyone, and closing the browser leaves preview on its own.
+
+:::warning The cookie grants nothing, and the banner is load-bearing
+`ktp_view_as` names a target; it is not a credential. `ktp-api` re-checks the caller's own token on every request, so a forged or stale cookie yields a 403 or 404 rather than access. `proxy.ts` honours it only when the session is already `eboard`.
+
+The banner is mounted at the **root layout**, not inside the portal layouts, so it follows you onto every page until you exit. This codebase has twice shipped bugs where two sessions coexisted in one browser and quietly disagreed, and both were invisible while happening. A preview that looks identical to the real portal is the same failure waiting: glance at an empty announcements list, conclude the chapter has none, and you were looking at a pledge's view without knowing.
+:::
 
 **All four portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
 
-:::note `/alumni` was deleted — alumni share `/member` (2026-08-05)
+:::warning `/alumni` came BACK on 2026-09-02. The note below is history.
+It is deliberately **not** the clone described below: no Committees, Meetings, Polls, Tickets or Calendar, because those are things a graduated member does not take part in. Six entries across two sections plus Account, in amber.
+
+The deletion still earned its keep in one specific way. The `/alumni → /member` redirects were written `permanent: false` **precisely so this day would be cheap** — a 308 is cached by browsers indefinitely and would have stranded anyone who had followed one. Restoring the portal was therefore a deletion of two lines rather than a support thread. ⚠ And those redirects **had** to go: a redirect shadows a real route, so leaving them would have sent every `/alumni` request to `/member` and none of the new pages would ever have rendered.
+
+If it ever drifts back into mirroring `/member` entry for entry, delete it again and route alumni to `/member` — that trade was correct the first time.
+:::
+
+:::note Why it was deleted in 2026-08 (historical)
 It was a copy of the member portal in amber. Every route wrapped the **same** shared component with a different `theme` prop and slightly different copy; the only structural difference was that it had no Attendance tab, which is chair-only anyway.
 
 It bought nothing, because `ktp-api` never distinguished the two: `alumni` has always been in `SHARED_ALBUM_GROUPS`, so an alumnus could already reach everything `/member` renders. What the duplicate did buy was a second place for every portal bug to hide — and it did, repeatedly (see the `GROUP_ORDER` and `Promise.all` traps elsewhere in these docs).
