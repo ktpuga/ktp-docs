@@ -596,6 +596,18 @@ The path param is a **rotating code**, not the stored token. It must match the c
 
 403s outside that window, on a stale code, or on the raw `attendance_token`.
 
+:::danger A re-scan never overturns an officer
+`event_attendance.marked_by` is non-null **only** when somebody set the row by hand from the roster, so it is the record of a human decision. Check-in's `ON CONFLICT` therefore leaves both `status` and `marked_by` alone whenever `marked_by` is already set: someone an officer marked **excused** stays excused, and someone marked **absent** stays absent until an officer changes it.
+
+Until 2026-09-02 the upsert was `SET status = 'present', checked_in_at = NOW(), marked_by = NULL`, so a second scan did not merely reverse the officer's decision — it erased the attribution, leaving nothing for anyone to notice. A member told "I'll mark you excused" who then scanned out of habit silently undid it.
+
+`checked_in_at` is `COALESCE`d for the same reason `setStatus` does it: the **first** scan is when they actually arrived, and re-scanning because the page was slow must not relabel that as ten minutes later.
+
+The trade goes both ways and is deliberate: somebody marked absent who then turns up and scans **stays absent** until an officer changes it. The officer is the one who can see the room.
+
+**The request still succeeds.** The rule is written as a SQL `CASE`, not a `WHERE` on the `DO UPDATE`, so the statement always `RETURN`s its row — `selfCheckIn` reads an empty result as "nothing was recorded" and answers `500`, so a guarded update would show "you are already marked excused" as "we could not record your check-in". Clients must read `record.status` rather than assuming `"present"`; the portal's confirmation screen says *"You're marked excused"* rather than *"You're checked in!"* when it differs.
+:::
+
 :::info Why this changed
 The QR previously encoded the raw `attendance_token`, which never rotates. Photographing the board therefore produced a credential that worked **from anywhere** until 30 minutes after the event ended, so a member could text it to somebody at home and have them check in. Attendance carries real chapter consequences, so that was worth closing.
 
@@ -608,7 +620,21 @@ Note what was never broken: check-in requires auth, so a scanner is always recor
 
 **What this does not solve:** a member checking in and then leaving. That needs a check-out step, not a better code.
 
-Regular members get no attendance UI beyond the post-scan confirmation screen. Only chairs and eboard see an Attendance surface in the portal.
+Regular members get no attendance **management** UI — only chairs and eboard see the Attendance surface in the portal — but since 2026-09-02 they can see **their own** recorded status on the calendar.
+
+### `myAttendance` on `GET /events`
+
+`"present"`, `"excused"`, `"absent"`, or `null`. Attached by `eventsController.getEvents` in **one** batched query for the whole page (`attendanceModel.findMyStatusesForEvents`), on the same seam as `myRsvp` and `canRsvp`.
+
+It is deliberately **not** set in `eventModel.toCalendarEventJSON`, which has no idea who is asking. So `GET /events/:id` and the ICS feed do not carry the key at all, rather than carrying a copy that could only ever be null — and a field that is always null is indistinguishable from "nothing was recorded", which is the exact confusion this exists to end.
+
+:::warning A `NULL` status is reported as `null`, not as attendance
+`syncRoster` materialises a row for **everybody an event is for**, with `status NULL` meaning "expected, nobody has accounted for them yet". The query filters those out with `status IS NOT NULL`. Dropping that filter would put a tick on every event a member was merely *invited* to — which is worse than no tick, because it is precisely the reassurance somebody goes looking for after a scan that did not land.
+:::
+
+`EventsCalendar.jsx` renders it in the slot the "Attendance" badge already occupied, so a card gains no fourth badge: *Checked in* (emerald), *Excused* (amber), *Marked absent* (rose), or the plain *Attendance* badge when nothing is recorded. Those strings are first-person and intentionally differ from `AttendancePage`'s roster labels (*Present* / *Absent*) — one is a member looking at themselves, the other an officer looking at other people. **Do not merge the two maps.**
+
+This is the only surface where a member can confirm a scan landed. Check-in reports success on a page they close immediately and the roster is officer-only, so throughout the window where check-in was silently recording nothing (fixed 2026-09-02) there was nowhere that would have shown it.
 
 ### The portal screen
 
