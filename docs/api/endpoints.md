@@ -594,12 +594,14 @@ The accepted cost of a manual finalise is that an event nobody finalises keeps d
 
 The path param is a **rotating code**, not the stored token. It must match the current 10-second period or the one immediately before it (so it is valid for between 10 and 20 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall inside the check-in window: from **30 minutes before the event's start** to **30 minutes after its end**.
 
-403s outside that window, on a stale code, or on the raw `attendance_token`.
+403s outside that window, on a stale code, or on the raw `attendance_token`. **404s on an event id that isn't a positive integer** — this id comes off a URL people point a phone camera at, and a torn poster or a half-decoded QR used to reach Postgres as `WHERE id = 'not-a-number'`, surfacing as a `500` with a stack trace in the logs and "Failed to check in" on the phone.
 
 :::danger A re-scan never overturns an officer
 `event_attendance.marked_by` is non-null **only** when somebody set the row by hand from the roster, so it is the record of a human decision. Check-in's `ON CONFLICT` therefore leaves both `status` and `marked_by` alone whenever `marked_by` is already set: someone an officer marked **excused** stays excused, and someone marked **absent** stays absent until an officer changes it.
 
 Until 2026-09-02 the upsert was `SET status = 'present', checked_in_at = NOW(), marked_by = NULL`, so a second scan did not merely reverse the officer's decision — it erased the attribution, leaving nothing for anyone to notice. A member told "I'll mark you excused" who then scanned out of habit silently undid it.
+
+**The guard is `marked_by IS NOT NULL` OR `status IN ('excused','absent')`, and the second half is not redundant.** `marked_by` is `REFERENCES users(authentik_id) ON DELETE SET NULL`, so deleting an officer's account NULLs it on **every row they ever marked** — silently turning their decisions back into "a self-scan" and making them overwritable again. That was measured, not theorised: with only the `marked_by` test, deleting the officer let a re-scan flip an excused member to present. Self check-in writes **only** `'present'`, so an `excused` or `absent` row can only have come from a person, whatever became of their account.
 
 `checked_in_at` is `COALESCE`d for the same reason `setStatus` does it: the **first** scan is when they actually arrived, and re-scanning because the page was slow must not relabel that as ten minutes later.
 
