@@ -36,6 +36,16 @@ Roughly thirty call sites filter on `req.user.groups`, and more read `req.user.a
 Becoming the account means every existing rule applies without being restated, so **the preview cannot disagree with the real thing**.
 :::
 
+:::danger `/events` forgot to honour it, and the calendar leaked
+`applyViewAs` originally lived only inside `requireAuth`, under a comment saying every router mounts that "so a new route cannot forget to honour preview mode." **`GET /events` and `GET /events/:id` use `optionalAuth`** — they are the only two routes in the API that do — so they never ran it.
+
+The consequence was specific and bad: `eventsController.getEvents` branches on `groups.includes("eboard")` to skip audience filtering entirely. During a preview `req.user` was still the real eboard caller, so **the calendar listed every event in the chapter, including ones deliberately hidden from rushees**, inside a portal whose announcements, polls and documents were all correctly filtered.
+
+Not an escalation — eboard can read all of it anyway. But a preview exists to show what somebody else sees, and it was showing something nobody else sees. `applyViewAs` now runs in both middlewares, and `test/portalPreview.test.js` asserts it for each.
+
+An **anonymous** caller who sends `X-View-As` on an `optionalAuth` route stays anonymous rather than getting a 403 — that route's contract is that it never rejects, and ignoring the header is also the least-privileged reading. An authenticated non-eboard caller still gets the 403.
+:::
+
 Four gates, all server-side in `middleware/auth.js`, and the UI is not one of them:
 
 | # | Gate |
@@ -59,6 +69,20 @@ Leaving preview is client-side — the cookie is deleted and that is all. That i
 `ktp_view_as` names a target; it is not a credential. `ktp-api` re-checks the caller's own token on every request, so a forged or stale cookie yields a 403 or 404 rather than access. `proxy.ts` honours it only when the session is already `eboard`.
 
 The banner is mounted at the **root layout**, not inside the portal layouts, so it follows you onto every page until you exit. This codebase has twice shipped bugs where two sessions coexisted in one browser and quietly disagreed, and both were invisible while happening. A preview that looks identical to the real portal is the same failure waiting: glance at an empty announcements list, conclude the chapter has none, and you were looking at a pledge's view without knowing.
+:::
+
+#### The browser has to render as the previewed account too
+
+Swapping `req.user` fixes what the API *returns*. It does nothing about what the client decides to *draw*, and every portal control was gated on the next-auth session — which still said eboard. So a preview showed correctly filtered member data underneath **eboard's toolbar**: Create Event, the edit and delete pencils, Create Committee, the document-management tiers, bulk invite, the directory's leadership actions.
+
+`lib/use-portal-viewer.js` is the seam. `usePortalViewer()` returns `{ groups, authentik_id, isPreview }` — the signed-in values normally, and the previewed account's while a preview is running. Every component that gates on a group or on "is this mine" reads from it instead of `useSession`.
+
+The previewed group rides in a third cookie (`ktp_view_as_group`, raw slug) so the hook needs no round trip, and is expanded through the same chair-implies-active rule the API applies. Like the other two cookies it **grants nothing** — it decides what to render, never what is allowed, and ktp-api re-checks the real caller's token on every request.
+
+The sidebar profile card is part of this: it used to fall back to `session.user` for the name, initials and group, so a preview showed the *previewing eboard member's* identity at the bottom of somebody else's portal. It now takes the identity from the fetched profile (which already arrives through `X-View-As`) and refuses the session fallback entirely while previewing.
+
+:::warning One frame of the real session, accepted deliberately
+The cookie is read in an effect, so the first paint uses the signed-in groups and an admin control can flicker once before disappearing. Reading it during render would mismatch the server-rendered HTML and break hydration; reading it in the layout would opt the public marketing pages out of static rendering — the regression `PreviewBanner` already documents. A one-frame flash of a button that cannot write is the cheapest of the three.
 :::
 
 #### Everything is clickable; only writes are inert
