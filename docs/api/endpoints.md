@@ -570,11 +570,44 @@ u.member_group = ANY(ev.audience)   -- WRONG
 
 One rule beyond the audience: **anyone with an existing `event_attendance` row stays on the roster regardless of targeting.** Audiences get edited after people have scanned, and an eboard member may check in to an event they were never targeted by — gating purely on the audience would hide a check-in the database already holds.
 
+#### `still_eligible` — on the roster, but no longer in the group
+
+Every roster row carries a live boolean saying whether that person is **still** one of the people this event is for. It is `false` once they change group, leave the committee the event was aimed at, or delete their account.
+
+**It is a display flag, never a filter.** Nothing is ever removed from a roster: `syncRoster` only ever `INSERT`s, and that is deliberate — the row records who was *expected when the event was made*, which is history. What changed is that the client now **greys those rows and labels them** (*"no longer in this group"*, or *"account deleted"*) instead of showing them indistinguishable from everybody else.
+
+:::danger Why the flag had to exist
+Without it, an officer working down the list marks somebody **absent** for a meeting they were uninvited from — and that absence then reads as fact. Hiding the row instead would be worse: it quietly rewrites who the event was for.
+:::
+
+The officer's status dropdown **stays usable** on a greyed row. Somebody who changed group last week may well still have walked through the door, and the officer standing in the room is the one who can see that. Only self check-in is refused.
+
+`still_eligible` is computed from `AUDIENCE_MATCH_SQL` in `attendanceModel` — **the same string `syncRoster` uses**, deliberately shared rather than re-written. If the two ever drifted, the roster would materialise somebody and then immediately grey them out, which reads as the feature being broken rather than as a rule being applied.
+
+:::warning The client must not grey a FINALIZED roster
+A finalized roster is history. Pledges are initiated mid-semester, so a live eligibility test applied to a past `audience: ['pledge']` event would grey out the entire pledge class the day they became active. `AttendancePage` gates on `finalizedAt`; the API returns the flag either way, because a model that answers a different question depending on a flag is how two callers end up disagreeing.
+:::
+
 `attendanceModel.findForEvent` still exists for the older "only what was recorded" shape; nothing calls it from the portal.
 
 ### `PUT /events/:id/attendance/:userId`
 
 **Eboard, cabinet or event creator.** Body `{ "status": "present" | "excused" | "absent" }`. Upserts, so it works for someone with no existing record.
+
+:::danger …unless the roster is FINALIZED, and then it only updates
+The portal tells the officer, in as many words: *"It is frozen, and nobody new is added. Marks can still be changed."* Until 2026-09-03 only the first clause was enforced anywhere, and only against self check-in. Because this route upserts, a `userId` naming somebody who was never on the roster **materialised a fresh row on a closed event** — measured going 0 → 1 rows.
+
+On a finalized event the model now runs a plain `UPDATE` (`allowInsert: false`), so:
+
+| Target | Result |
+|---|---|
+| Already on the roster | `200` — marks stay editable, which is the whole reason officers finalize at all |
+| Not on the roster | `403` *"…nobody new can be added. Reopen it to add them."* |
+
+The 403 is deliberately a **different sentence** from the `404` for a member who no longer exists. One is fixed by reopening the roster and the other never is; telling an officer "that member no longer exists" about somebody standing in front of them sends them after the wrong problem.
+
+**The web UI could never reach this** — it renders only rows the roster already holds. iOS builds the URL itself, which is why the rule had to live at the API.
+:::
 
 ### `PUT /events/:id/attendance-finalized`
 
@@ -595,6 +628,23 @@ The accepted cost of a manual finalise is that an event nobody finalises keeps d
 The path param is a **rotating code**, not the stored token. It must match the current 10-second period or the one immediately before it (so it is valid for between 10 and 20 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall inside the check-in window: from **30 minutes before the event's start** to **30 minutes after its end**.
 
 403s outside that window, on a stale code, or on the raw `attendance_token`. **404s on an event id that isn't a positive integer** — this id comes off a URL people point a phone camera at, and a torn poster or a half-decoded QR used to reach Postgres as `WHERE id = 'not-a-number'`, surfacing as a `500` with a stack trace in the logs and "Failed to check in" on the phone.
+
+:::danger The event's audience is now checked at the door
+Until 2026-09-03 this route asked only for a valid code and an open window, so **anybody holding a live code could join any roster** — a rushee who scanned an actives-only event was recorded as present on it, a row `syncRoster` would never have built.
+
+Eligibility is now `attendanceModel.isEligibleForEvent`, evaluated against the same `AUDIENCE_MATCH_SQL` the roster uses. A refusal is `403` with *"This event isn't open to your group."*
+
+It is also what makes the roster's grey-out honest: somebody who changed group since the event was created stays on the roster as a record of who was expected, and this is what stops them scanning back in underneath that.
+
+**Two cases fail OPEN, on purpose:**
+
+| Case | Answer | Why |
+|---|---|---|
+| `users.member_group IS NULL` | eligible | The account exists but no group has resolved — a brand-new member mid-signup, or an Authentik enrollment that assigned none. Turning away a real member standing at the board costs far more than admitting somebody an officer can unmark. |
+| No `users` row at all | eligible | This is the exact case self check-in **heals** from the caller's verified token, and it is the first thing a new member does at their first event. Refusing here would break the path this feature was fixed for. |
+
+A rushee is unaffected by either: their group *is* known, and `rush` matches no member audience.
+:::
 
 :::danger A re-scan never overturns an officer
 `event_attendance.marked_by` is non-null **only** when somebody set the row by hand from the roster, so it is the record of a human decision. Check-in's `ON CONFLICT` therefore leaves both `status` and `marked_by` alone whenever `marked_by` is already set: someone an officer marked **excused** stays excused, and someone marked **absent** stays absent until an officer changes it.

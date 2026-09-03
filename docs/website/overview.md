@@ -61,6 +61,31 @@ Leaving preview is client-side — the cookie is deleted and that is all. That i
 The banner is mounted at the **root layout**, not inside the portal layouts, so it follows you onto every page until you exit. This codebase has twice shipped bugs where two sessions coexisted in one browser and quietly disagreed, and both were invisible while happening. A preview that looks identical to the real portal is the same failure waiting: glance at an empty announcements list, conclude the chapter has none, and you were looking at a pledge's view without knowing.
 :::
 
+#### Everything is clickable; only writes are inert
+
+`PreviewGuard`, mounted in the root layout, used to swallow **every** button click. That did stop writes, but it also stopped tabs, modals, expanders and the calendar's month arrows — controls that issue no request at all and only move client state. Half of what a preview exists to show lives behind one of those, so the feature read as broken.
+
+The rule is now inverted: **everything runs by default, and only controls that actually write are swallowed.** Those carry `data-preview-block`. Two additions matter:
+
+- **Form submits are swallowed whether marked or not** — a form is unambiguously a write. `[data-preview-allow]` is the exception, and it is what keeps the banner's own Exit form working.
+- **`change` is intercepted as well as `click`.** A `<select>` never fires a click on its option, so the attendance status dropdown reached the API *even under the old block-everything rule*.
+
+A blocked interaction raises a toast — *"Preview only. Nothing was saved."* — rather than silently doing nothing. A control that does nothing reads as a bug, which is precisely the report that produced this rewrite.
+
+:::tip Why a missed marker is safe
+Gate 4 has not moved. `ktp-api` still refuses any non-`GET`/`HEAD` request in preview, so an unmarked control **cannot write**. It gets a 403, which crosses the Server Action boundary and surfaces as React's #441 digest — ugly, and worth fixing when spotted, but a **visible** failure.
+
+That asymmetry is the entire reason the rule is "block the marked ones" and not "allow the marked ones": a mistake in this direction is annoying, and a mistake in the other direction is invisible.
+
+The markers were placed from the **call graph**, not by eye: every exported `lib/portal-api.js` function that can reach a write (following delegation through `sendEventPayload`, `sendMultipart`, `adminMutate` and `interviewDelete`), then every `onClick`/`onChange`/`onSubmit` whose expression reaches one — including handlers passed down as props into child components.
+:::
+
+:::warning View receipts are dropped, not refused
+`markConversationRead`, `markGroupChatRead`, `markCommitteeSeen` and the notification `seen` writes fire from an **effect**, not a click, so no click guard can swallow them — and they would 403 mid-render. `apiRequest` drops those four paths outright while a preview target is set.
+
+That is the correct behaviour rather than a workaround: eboard reading a QA account's inbox must not mark that account's messages as read, or the preview quietly changes the thing it is supposed to be observing.
+:::
+
 **All four portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
 
 :::warning `/alumni` came BACK on 2026-09-02. The note below is history.
