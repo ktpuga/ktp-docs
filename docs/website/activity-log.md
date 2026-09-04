@@ -10,6 +10,16 @@ Every state-changing request across the site, readable by eboard on the **Activi
 
 The entire design rests on one decision: entries are recorded by `middleware/auditLog.js`, registered **once, globally**, above the routers. There is no `logAction()` call inside any controller.
 
+:::tip Its counterpart: `middleware/logFailures.js`
+Same shape, opposite subject. The audit log records what **succeeded**, for eboard to read. `logFailures` records every **4xx/5xx** the API sends, for us to read — `warn` below 500, `error` at 500 and above, so real breakage is not buried under ordinary refusals.
+
+It exists because silent refusals made a live bug undiagnosable: `selfCheckIn` logged on its two 500 paths and none of its four refusals, so a production log covering a whole event contained **no lines at all** while people were being turned away at the door. An audit found **366 more 4xx returns across 27 controllers** with nothing logging near them — which is exactly why this is middleware rather than 366 edits that the next feature would drift from.
+
+⚠ It does **not** replace a controller logging its own *reason*. It can only report what was sent; it cannot know that "That check-in code has expired" was really "attendance is not enabled on this event".
+
+⚠ **The path can be a credential**, and two are: `/checkin/:eventId/:token` carries the live rotating code, and `/calendar/feed/:token` *is* the feed's entire credential. Both are redacted by **shape**, not route name, so remounting a route keeps its redaction; query strings are dropped whole. Adding a route with a secret in its URL means adding a redaction.
+:::
+
 A log you have to remember to write is missing exactly the case being investigated. Middleware cannot be forgotten when somebody adds a route next semester — a brand-new endpoint is logged the moment it exists, before anyone writes a rule for it.
 
 :::warning The ordering is subtle and load-bearing
