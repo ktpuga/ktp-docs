@@ -227,6 +227,18 @@ Backs iOS push notifications. `push_devices` holds APNs tokens per user (private
 
 APNs credentials come from environment variables only — the API never reads a `.p8` file from disk. Delivery failures are logged and never fail the underlying message or event write.
 
+### `contact_sheet_rows` table
+
+The chapter's contact spreadsheet, imported as CSV. One row per person the chapter has ever had, **replaced wholesale on every import**: it is a copy of a spreadsheet and nothing in it is authored in the portal, so there is nothing to reconcile row by row.
+
+`row_index` preserves the sheet's own order and is what reads order by. Every column is `TEXT`, because a hand-kept spreadsheet is text. `graduation_date` holds "May 2027" and `status` holds "Graduated/Working"; neither is worth a type that would reject the real data.
+
+:::note There was a second table, and it is gone
+`contact_sheet_links` held eboard's manual account assignments back when rows were matched to portal accounts by name. Account matching was removed on 2026-09-04, and migration `1790500000000` drops it.
+
+It is a **separate migration** rather than an edit to `1790400000000` because that one had already run in production. node-pg-migrate records applied migrations by *filename*, so rewriting an applied file does not re-run it. It just leaves the file and the database describing different schemas, permanently, with nothing to detect the divergence.
+:::
+
 ### `ios_homepage_slides` table
 
 The in-app slideshow, separate from `homepage_photos` (which is the website's public gallery). Carries title/alt text/subtitle, an optional HTTPS link and label, `is_active`, and optional `starts_at`/`ends_at` for scheduling. A slide is visible only when active and inside its window; max 10 active at once.

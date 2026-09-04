@@ -467,6 +467,26 @@ Any authenticated member, answering for themselves. There is no route for answer
 
 The cut-off is **`endDate`, not `startDate`**: someone stuck in traffic changing "going" to "can't make it" during the event is exactly the update the organiser most wants. 409 rather than 400 because the request is well formed and the client should *hide the control*, not report a validation error.
 
+### `DELETE /events/:id/rsvp`
+
+Withdraws the caller's own answer, putting them back to never-answered. Added because the portal used to make an RSVP one-way: once you answered you could switch between "going" and "can't make it", but there was no way back to having said nothing.
+
+| Status | When |
+|---|---|
+| `200` | `{ eventId, status: null, removed }` |
+| `400` | Bad id, or the event is not asking for RSVPs |
+| `403` | `{ "message": "This event was not sent to you" }` |
+| `404` | No such event |
+| `409` | `{ "message": "This event has already ended" }` |
+
+**The guard ladder is identical to the `PUT`, deliberately.** A withdrawal writes the same row, so anything that refuses setting must refuse clearing — otherwise `DELETE` becomes a way to mutate a row the setter has already frozen. In particular it still 409s after `endDate` and still 403s for a non-recipient.
+
+**Removing an answer you never gave is a `200` with `removed: false`, not a `404`.** The caller asked to end up with no RSVP and they have no RSVP; reporting a failure would describe the row rather than the outcome, and a double tap in the portal would surface an error for a state that is already correct.
+
+**It deletes the row rather than storing a third status.** `summary.pending` is derived by subtracting the stored answers from the recipient list, so a withdrawn RSVP has to return to the exact shape a never-answered member has — a third state would make `pending` wrong and would need handling in every read. A member who withdraws drops out of `going`/`not_going` and back into `pending`; `total` does not move, because they are still in the audience.
+
+It is a separate verb rather than `PUT { "status": null }` so the setter's validator stays strict (`status` required, enum-checked) and there is no sometimes-null field for a Swift `Codable` to model. A withdrawal also reads as a delete in the activity log.
+
 ### `GET /events/:id/rsvps`
 
 **Eboard or the event's creator only.** Note this is a *narrower* set than attendance, which also allows any chair — response rows name individuals.
@@ -966,6 +986,38 @@ Gated **twice**: `requirePledgeManage` on the route and `mayEditPresentation` in
 Its own verb rather than saving an empty string, because `body` is `NOT NULL` and `""` would be a row that exists and says nothing — which the deck cannot tell apart from a slide somebody is still drafting.
 
 ---
+
+## Contact sheet
+
+The chapter's hand-kept spreadsheet of **every member it has ever had**, imported as CSV into `contact_sheet_rows`.
+
+:::warning Narrower than the rest of the portal
+Gated on `CONTACT_SHEET_GROUPS` = `["eboard", "chair", "active", "alumni"]`. **Rushees and pledges cannot read it at all.** It holds personal phone numbers, personal emails and Instagram handles for people who have left the chapter, so it is deliberately narrower than `SHARED_ALBUM_GROUPS`.
+
+That constant is written out in full rather than derived by filtering another list. Adding a group to `SHARED_ALBUM_GROUPS` for its own reasons must not silently grant access to everyone's personal phone number.
+:::
+
+**It is not the Directory.** The Directory is people *with* portal accounts; this is the whole chapter *including* the people without. That distinction is the only thing justifying two surfaces with overlapping data. If it ever stops being true, one of them should go.
+
+Rows carry **no link to portal accounts**. An earlier version resolved each row to a user by normalised name, with ambiguity handling and an eboard override table; removed on 2026-09-04 because the sheet is a read-only reference. Migration `1790500000000` drops the leftover table.
+
+### `GET /contact-sheet`
+
+Every row, in **sheet order**. `row_index` is data, not presentation: "in order of the spreadsheet" is what somebody checks against when a row looks wrong. The website groups by pledge class for display and preserves this order inside each group.
+
+### `POST /admin/contact-sheet/import`
+
+Eboard only. Body `{ csv, headerRows }`, where `csv` is the file **contents as text** rather than a multipart upload, since nothing is stored on disk. **Replaces every row** in one transaction, so a half-written sheet is never left behind.
+
+Answers `{ imported, sample }`, the sample being the first three rows as parsed. That exists for a specific reason:
+
+:::danger Columns are matched by position, not by header name
+The real export's headers are prose written for humans, such as `First Name (Preferred):` and `Additional Social Media/NOTES:`, and they have been reworded before. Matching on those strings would break the import the next time somebody tidies a header, and it would break **silently**, dropping a column rather than failing. Position is the stabler contract; the `sample` is how a human catches a shifted column in the ten seconds after importing rather than weeks later.
+:::
+
+Column order: `class_name, first_name, last_name, major, graduation_date, status, phone, personal_email, linkedin_url, instagram, job, notes`.
+
+`headerRows` is **2** for the chapter's real export: row 1 is a confidentiality banner, row 2 the column names. At 1 you import a member called "First Name (Preferred): Last Name:"; at 3 you silently lose the first member. Rows with neither a first nor a last name are skipped, which drops trailing blanks and the unrelated Apps Script tutorial sitting off to the right in columns 13 and beyond. Cells reading `N/A` become null, since rendering "N/A" as a job title is worse than rendering nothing.
 
 ## Resumes
 
@@ -1556,9 +1608,19 @@ Full thread with that specific user, chronological.
 
 ### `POST /messages`
 
-**Multipart**, not JSON — fields `recipient_id`, `body`, `file`. Either `body` text *or* a `file` attachment is required; both together is fine. Attachments cap at 25MB.
+**Multipart**, not JSON — fields `recipient_id`, `body`, `file`, `reply_to_id`. Either `body` text *or* a `file` attachment is required; both together is fine. Attachments cap at 25MB.
 
 Image attachments go to Immich, everything else to ktp-api's own disk under `uploads/message-attachments/` — `services/messageAttachments.js` decides per-file by mimetype.
+
+#### Replies
+
+`reply_to_id` points at another message and makes this one a reply. Every read of a message carries a `reply_to` object (or `null`) with the parent's `id`, `sender_id`, `sender_display_name`, `body` and `attachment` — enough to render a quote without a second fetch. The send response already includes it, because the insert is a CTE that left-joins the parent and its sender.
+
+**The target is validated against the conversation, not just its id.** A DM reply must reference a message in that exact two-person thread; a group-chat reply, a message in that same chat. Anything else is a `400`.
+
+This is a **disclosure guard, not a tidiness check.** A bare integer id would otherwise let someone reply to a message in a conversation they cannot see and read its body and sender back out of their own reply preview.
+
+**`reply_to_id` is `ON DELETE SET NULL`.** Deleting a message leaves its replies in place with `reply_to: null` rather than deleting them. CASCADE would let a single delete remove unrelated messages, and would make a thread containing a deleted parent impossible to moderate.
 
 ### `PUT /messages/conversations/:userId/read`
 
@@ -1626,7 +1688,7 @@ Full thread — **403** if the caller isn't a member of this chat.
 
 ### `POST /group-chats/:id/messages`
 
-**Multipart**, same `body`-or-`file` rule as direct messages. **403** if not a member.
+**Multipart**, same `body`-or-`file` rule as direct messages, and the same optional `reply_to_id` ([Replies](#replies)) — scoped to this chat, so a message id from another chat is a `400`. **403** if not a member.
 
 ### `PUT /group-chats/:id/read`
 
