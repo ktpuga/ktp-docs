@@ -22,6 +22,14 @@ Any member can message any other member — no membership list or approval neede
 
 Each conversation shows an unread badge and the last message preview. Opening a conversation marks it read.
 
+:::danger The badge must hide exactly the senders the list hides
+`findConversations` excludes senders whose account is a **test account** or is **soft-deleted**, matching the directory and the "start a DM" picker — you could never open a *new* conversation with one, so the existing ones are hidden for consistency.
+
+`countUnread`, which drives the sidebar and tab badges, was a bare `COUNT(*)` with no such filter. A message from a hidden sender therefore produced a badge with **no conversation anywhere to open** — and since the only thing that clears a message is opening its conversation and calling `markConversationRead`, that badge could never be cleared at all.
+
+Not theoretical: a portal preview leaked a DM from a QA account, and the recipient was left with a permanent unread marker and nothing to click. `countUnread` now joins `users` on the sender with the same two conditions. **If `findConversations`' filter changes, change this with it** — two queries answering "which conversations exist" differently is the entire bug.
+:::
+
 ---
 
 ## Group Chats

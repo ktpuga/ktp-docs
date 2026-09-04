@@ -104,6 +104,24 @@ That asymmetry is the entire reason the rule is "block the marked ones" and not 
 The markers were placed from the **call graph**, not by eye: every exported `lib/portal-api.js` function that can reach a write (following delegation through `sendEventPayload`, `sendMultipart`, `adminMutate` and `interviewDelete`), then every `onClick`/`onChange`/`onSubmit` whose expression reaches one — including handlers passed down as props into child components.
 :::
 
+:::danger A message escaped a preview, because only `apiRequest` sent the header
+`previewHeader()` lived inside `apiRequest`. But roughly **thirty** calls in `lib/portal-api.js` are direct `fetch`es that deliberately bypass that helper — every multipart upload, the message sends, the profile and username writes, the interview notes. `apiRequest` sets `Content-Type: application/json` whenever a body is present, which strips a multipart boundary, so those calls *must* go around it.
+
+They went around `X-View-As` at the same time. The API therefore had no idea a preview was happening on any of them, `applyViewAs` never ran, and the write was accepted **as the real eboard member**. A message sent while previewing was delivered by an account that had not written it: it never appeared in the previewed portal, the recipient got a notification for it, and the sender could not find it to delete.
+
+That is exactly the attribution failure the read-only rule exists to prevent — the rule simply never got a chance to run. All 27 authenticated call sites now spread `...(await previewHeader())`.
+
+**If you add a `fetch` to `portal-api.js`, spread the preview header into it.** There is no lint rule for this one, and the failure is silent.
+
+*(Recovering a message that escaped this way: `deleteMessage` permits the sender **or** eboard, so exiting preview and deleting it from your own Messages works regardless of which account it was attributed to.)*
+:::
+
+:::warning Enter-to-send needed its own marker
+The composer sends on Enter, so marking the send button was not enough — and this is how the message above actually escaped. It cannot be a plain `data-preview-block`: swallowing every keystroke on the textarea means you cannot type in it at all, and being unable to read a conversation properly defeats the preview.
+
+`data-preview-block-enter` swallows **plain Enter only**. Shift+Enter still makes a newline, and IME composition is left alone — pressing Enter to accept a candidate in a Japanese or Chinese input method is not a send, and treating it as one would make the box unusable in those languages.
+:::
+
 :::warning View receipts are dropped, not refused
 `markConversationRead`, `markGroupChatRead`, `markCommitteeSeen` and the notification `seen` writes fire from an **effect**, not a click, so no click guard can swallow them — and they would 403 mid-render. `apiRequest` drops those four paths outright while a preview target is set.
 

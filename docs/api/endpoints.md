@@ -644,6 +644,10 @@ It is also what makes the roster's grey-out honest: somebody who changed group s
 | No `users` row at all | eligible | This is the exact case self check-in **heals** from the caller's verified token, and it is the first thing a new member does at their first event. Refusing here would break the path this feature was fixed for. |
 
 A rushee is unaffected by either: their group *is* known, and `rush` matches no member audience.
+
+**And a third fallback, which is what stops this becoming a new "log out and log back in".** `isEligibleForEvent` reads `users.member_group`, and `/users/sync` writes that **only on first sign-in**. The `groups` claim on the bearer token comes from Authentik and refreshes with the token, so it is the *fresher* of the two. A rushee who has just been accepted as a pledge carries `pledge` in their token while the row still says `rush` — and would have been turned away at their first pledge event until they signed out and back in.
+
+So when the stored group says no, the call falls back to `eventModel.findByIdForUser` — the existing audience authority for "can this viewer see this event". Anything on their own calendar is something they may scan into. Reusing that rather than writing a fourth audience predicate is deliberate; this codebase has already been bitten by two that drifted. It only runs when the first check fails, so an ordinary scan is still one query.
 :::
 
 :::danger A re-scan never overturns an officer
