@@ -115,7 +115,7 @@ Until migration `1788200000000` a trait was `{ label, value }` and rendered as a
 Both cards coerce an un-migrated pair through `traitText()` rather than rendering it directly. React **throws** on an object child, so without that, deploying the site before running the migration would take the public roster down rather than merely look wrong.
 :::
 
-This generalises the exec title, which is the same idea fixed to one label. Exec titles stay exactly as they are; a trait is additive, a role is not.
+This generalises the exec title, which is the same idea fixed to one label. Traits stay free text on purpose; the exec title became a row in [`exec_roles`](../api/overview.md#exec_roles-table) because code needs to *identify* a role, and nothing needs to identify a trait.
 
 Set them from **Admin → Users → Edit** on any member. Up to six, label ≤40 characters, value ≤80.
 
@@ -284,7 +284,25 @@ The last two aren't shown on your own profile.
 `/admin/users` (eboard only) shows real member data — search, group filter, profile-complete filter, refresh button. Two things are editable inline on each row:
 
 - **Group** — picking a new value calls Authentik directly to move them there, then mirrors it immediately, with no waiting for their next login. See [Operations: Changing a Member's Group](../operations/member-management.md#changing-a-members-group).
-- **Exec title** — free text (e.g. "President", "VP of Finance"), shown on the directory and the public roster. Purely a display label: it makes no Authentik call and isn't validated against the member's group, though it's only ever surfaced for eboard.
+- **Exec role** — a picker over the rows in [`exec_roles`](../api/overview.md#exec_roles-table), shown only on eboard members. It makes no Authentik call. Choosing a role writes both the role id and its label onto the member; choosing "No exec role" clears both.
+
+**The search box sits above the stat cards, and a query searches every group at once.** Both are deliberate. It used to sit below four stat cards, near the fold on a laptop, and results were bucketed by group and shown one tab at a time — so searching for an alumnus while the Eboard tab happened to be open returned nothing, which reads as "search is broken" rather than "wrong tab". While a query is active the tabs are hidden and results render as one flat list; each card already carries a group badge, so nothing is lost.
+
+### Exec roles
+
+The picker is fed by one `GET /admin/exec-roles?includeInactive=1` for the whole page. **Retired roles are filtered out of each picker except on the member who holds one** — hiding a role while somebody still holds it must not make it vanish from their card, or the select would render as "No exec role" on a person who plainly has one and the next save would clear a position they hold.
+
+An **Exec roles** button in the page header opens the manager: add a position, rename one, reorder with the arrows, retire one, delete one. It is a modal on this page rather than a nineteenth sidebar entry — the list is eight rows touched a few times a year, and this is the page where roles are actually handed out.
+
+Three behaviours are worth knowing before editing this screen:
+
+- **Renaming updates everyone holding the role**, because `users.exec_title` is a copy of the label. The API does it in the same call; the modal mirrors it into the open list so the cards behind it do not keep showing last year's title until a refresh.
+- **Deleting is refused while anyone holds the role**, and the API's message names the count. Retiring is the intended alternative and keeps the record of who held it.
+- **The slug is shown but never editable.** It is the stable key a future permission check gets written against, derived from the label once at creation. Renaming changes what people read and nothing else.
+
+Holder counts on that screen are **counted from the loaded user list**, not carried from the roles response. Both are the same population (`deleted_at IS NULL`), so it is exactly what the API computes, and deriving it means assigning a role updates the count with no bookkeeping to get wrong.
+
+Anything the exec-roles migration could not match to a row is still free text in `exec_title`. The picker shows it, greyed, as *Typed as "..."* — choosing a role overwrites it, so the picker is also the fix.
 
 There is still **no way to remove or deactivate a user from this page** — member removal remains an Authentik-side operation (see [Member Management](../operations/member-management.md)), not something the website UI does.
 

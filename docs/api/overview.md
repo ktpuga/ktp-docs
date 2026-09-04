@@ -77,7 +77,8 @@ PostgreSQL database: `ugaktp_db` on LXC 118 (`10.0.0.54:5432`)
 | `pledge_class` | `TEXT` | e.g. "Alpha", "Beta" |
 | `profile_picture_asset_id` | `TEXT` | Immich asset ID |
 | `member_group` | `TEXT` | One of: `active`, `pledge`, `eboard`, `chair`, `alumni` |
-| `exec_title` | `TEXT` | Free-text eboard position ("President", "VP of Finance"). Display-only — not validated against `member_group`, though only ever shown for eboard |
+| `exec_role_id` | `INTEGER REFERENCES exec_roles(id) ON DELETE SET NULL` | The eboard position, as a row. This is the column to read when you need to *identify* a role |
+| `exec_title` | `TEXT` | The label of that role, **copied onto the row**. Display-only, written only by `updateExecRole` and by a rename in `execRoleModel.update`. Still holds free text for anything the exec-roles migration could not match |
 | `is_test_account` | `BOOLEAN` | Hides the row from the public `/roster`, the member directory, **group chat member lists, and the DM conversation list**. Set manually; there's no UI for it |
 | `profile_complete` | `BOOLEAN DEFAULT FALSE` | |
 | `deleted_at` | `TIMESTAMPTZ` | Set by self-service `DELETE /users/me` (anonymize, not hard-delete — see below). `NULL` for every active member |
@@ -134,6 +135,30 @@ An eboard-managed file library (bylaws, meeting minutes, course files, etc.) sho
 | `documents` | `folder_id` (nullable — `NULL` = top level), `filename` (original name shown to users), `kind` (`file` \| `link`), `storage_path`/`mime_type`/`file_size` (only for `kind = "file"`, never exposed to clients as a raw path), `url` (only for `kind = "link"`), `uploaded_by` |
 
 A "document" can now be an external hyperlink (Google Docs/Slides/Sheets, or any URL) instead of an uploaded file — same folder tree, same eboard-write permissions, just no file on disk. `storage_path` is nullable to allow for this. View: any shared-album-group member. Writes (folders, files, and links alike): eboard only. Deleting a folder cascades its DB rows *and* walks a recursive query to delete every nested file from disk too (link rows have nothing on disk to clean up) — disk space on the API's LXC is limited, so orphaned files aren't left behind.
+
+### `exec_roles` table
+
+The eboard positions, as rows rather than as text somebody typed. Added by migration `1790300000000`.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `SERIAL PRIMARY KEY` | What `users.exec_role_id` points at |
+| `slug` | `TEXT NOT NULL UNIQUE` | The stable key. Derived from the label **once, at creation**, and never rewritten |
+| `label` | `TEXT NOT NULL` | What people read. Eboard edits this freely |
+| `sort_order` | `INTEGER NOT NULL DEFAULT 0` | Picker order. President is not alphabetically first |
+| `is_active` | `BOOLEAN NOT NULL DEFAULT TRUE` | `false` retires a role: hidden from the picker, still on whoever holds it |
+
+Same shape as `committees.slug`, and for the same reason: a slug is how this codebase grants a capability to a specific group (`slug = 'judicial'` gates the report queue, `slug = 'pledge'` gates rush data). A future "only the treasurer may do X" is then a comparison against `slug = 'treasurer'` rather than a match on whatever wording was typed that year.
+
+:::warning Two rules that are easy to break
+**Renaming a role must never move its slug.** The label is what people read; the slug is what code is written against. `execRoleModel.update` deliberately has no `slug` in its `SET` list, and `PUT /admin/exec-roles/:id` refuses to accept the field at all.
+
+**`users.exec_title` is a deliberate copy of `label`**, so that four member projections, the public roster and the rush announcement author line read a role with no join. That copy has exactly two writers — `userModel.updateExecRole` (assignment) and `execRoleModel.update` (rename, which rewrites every holder in the same call). Anything else writing that column puts the two out of step, and the symptom is a card reading last year's title.
+:::
+
+**Deleting is refused (`409`) while anybody holds the role**, and that refusal is the intended answer, not an obstacle. The FK is `ON DELETE SET NULL`, so a delete would strip the position off those people's profiles with nothing recording what it had been. Retiring (`is_active = false`) is how a role leaves the picker.
+
+`exec_title` is **not** dropped by the migration. It stays as the record of anything the backfill could not match to a row, and the admin picker surfaces those leftovers so eboard can correct them. Dropping it belongs in a later migration, once nothing relies on it.
 
 ### `committees` / `committee_members` tables
 

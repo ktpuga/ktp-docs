@@ -214,7 +214,7 @@ Never touches Authentik — revoking real chapter/SSO access is a separate, eboa
 
 Each trait is one **plain string**, not a `{ label, value }` pair. They render as pills beside the member's group badge, the same treatment a chair's committee caption gets, and "Pledge Chair" is one string rather than a label and a value. Migration `1788200000000` changed the shape and converted existing rows by joining the halves as `"label: value"` — dropping either half would have destroyed chapter-authored text on a public page. A `{ label, value }` entry is now **rejected with a 400** rather than stringified, because storing it would print the literal text `[object Object]` on the public roster.
 
-Traits appear on the member's directory card and on the **public** roster, under their role. They generalise `exec_title`, which stays as it is.
+Traits appear on the member's directory card and on the **public** roster, under their role. They generalise the exec title, which stays as it is — a trait is additive, a role is not. (The exec title itself is now a row in [`exec_roles`](./overview.md#exec_roles-table); traits were left as free text on purpose.)
 
 :::info "Eboard-only" here means no other route can write them
 `traits` is deliberately **not** in `PROFILE_FIELDS`. That list is shared by `PUT /users/me/profile` and `PUT /admin/users/:id/profile`, so a key added there is settable by the member as well as by eboard — and these land on a page with no authentication. Making the boundary "which routes exist" rather than "which routes check" is what stops a future edit to a shared list quietly turning them self-service.
@@ -1819,9 +1819,49 @@ Returns all users in the database.
 
 `{ "group": "eboard" | "chair" | "active" | "alumni" | "pledge" }` — moves the target user to this group in Authentik itself (removing them from whichever other role group they're currently in there), then mirrors the change into `users.member_group` immediately. See [API Overview: Eboard — changing a member's group](./overview.md#eboard-changing-a-members-group) for the full mechanism and required Authentik setup.
 
+### `GET /admin/exec-roles`
+
+Every exec position, ordered by `sort_order` then `label`. Each row carries `id`, `slug`, `label`, `sort_order`, `is_active` and a computed `holder_count` (live members only — `deleted_at IS NULL`).
+
+`?includeInactive=1` also returns retired roles. The admin portal asks for those, because the manager screen has to show a retired role for anybody to un-retire it, and because a role hidden from the picker while somebody still holds it must not vanish from that person's card.
+
+### `POST /admin/exec-roles`
+
+`{ "label": "Vice President of Operations", "sortOrder": 8 }`. `sortOrder` is optional and defaults to `0`; it must be a whole number between 0 and 999.
+
+The `slug` is derived from the label here and **is not accepted from the caller**. Two labels that reduce to the same slug (`"VP, Finance"` and `"VP Finance"`) both succeed — the second gets `-2` appended — rather than failing the `UNIQUE` constraint with a 500 on an ordinary create.
+
+### `PUT /admin/exec-roles/:id`
+
+`{ "label"?, "sortOrder"?, "isActive"? }`. Absent keys are left alone.
+
+`slug` is **deliberately not an accepted field**. Renaming a role changes what people read and nothing else — see [the warning in the overview](./overview.md#exec_roles-table).
+
+A rename also rewrites `users.exec_title` for every holder, in the same call. That column is a copy of the label, and a rename that updated only `exec_roles` would leave the old wording on every card until somebody reassigned the role by hand.
+
+`isActive: false` retires a role: gone from the default list, still attached to whoever holds it.
+
+### `DELETE /admin/exec-roles/:id`
+
+`204` when nobody holds the role.
+
+**`409` while anyone does**, with a message naming the count. The FK is `ON DELETE SET NULL`, so deleting would silently strip the position off those profiles with nothing recording what it had been; retiring the role is the intended alternative and the message says so.
+
+### `PUT /admin/users/:authentikId/exec-role`
+
+`{ "execRoleId": 3 }`, or `null` to clear it. This is the route the admin portal uses.
+
+Writes **both** `exec_role_id` and `exec_title`, and reads the label from the `exec_roles` row rather than from the request body — so a client cannot put arbitrary text into a column that now claims to be a role.
+
+`404` when either the member or the role is gone, rather than a silent `200`. The two cases are not told apart: it would take a second query, and both mean the same thing to an admin looking at a stale page.
+
 ### `PUT /admin/users/:authentikId/exec-title`
 
 `{ "execTitle": "President" }`, or `null`/omitted to clear it. Free-text eboard position.
+
+:::note Superseded by `exec-role` above
+Kept mounted for the leftovers. The exec-roles migration backfilled by exact label match, and anything it could not match is still plain text in `users.exec_title` — this is the one route that can correct such a value directly. New writes should go through `PUT /admin/users/:authentikId/exec-role`, which is the only way to get a `slug` attached.
+:::
 
 Purely a display label — it makes no Authentik call and isn't validated against `member_group`, though it's only ever surfaced for eboard members (on the directory and the public roster). Unlike the group change above, this one touches nothing outside ktp-api's own database.
 
