@@ -513,7 +513,7 @@ Turning `requiresRsvp` back off does **not** delete the answers, matching how di
 QR-code check-in for events that opted in via `requiresAttendance`. Managing attendance is **eboard, cabinet (chairs), or the event's own creator** — `MAY_MANAGE_ATTENDANCE` in `attendanceController`. Checking yourself in is self-service for any member.
 
 :::note Cabinet has full access, unlike event creation
-This is deliberately broader than `checkEventPermission`, which restricts a chair to *creating* events scoped to a committee they chair. Attendance is about **running the room**: a chair is usually the person standing at the front, and requiring the creator made the feature unusable whenever an eboard member had made the event on their behalf.
+This used to be deliberately broader than the event-creation rule, which restricted a chair to committee-scoped events. Since 2026-09-04 `checkEventCreate` lets cabinet create anything, so the two now agree on creation and differ only on *editing somebody else's* event. Attendance is about **running the room**: a chair is usually the person standing at the front, and requiring the creator made the feature unusable whenever an eboard member had made the event on their behalf.
 :::
 
 ### `GET /events/:id/attendance/code`
@@ -1469,21 +1469,27 @@ A `NULL` `uploaded_by` — the uploader's account was hard-deleted — matches n
 
 One-way broadcast, no replies. Any rush-accessible member can view (filtered by audience). Same targeting shape as Events: `audience` is an array, or scope to one `committee_id` instead.
 
-**Who may post, as of 2026-08-25:**
+**Who may post, as of 2026-09-04:**
 
-| Caller | May post | May edit / delete |
+| Caller | May create | May edit / delete |
 |---|---|---|
 | Eboard | anything, including chapter-wide | anything |
-| **Committee chair** ("cabinet") | **only to a committee they chair** | only announcements belonging to a committee they chair |
+| **Committee chair** ("cabinet") | **anything, including chapter-wide** | **only what they posted, or their own committee's** |
 | Everyone else | nothing | nothing |
 
-:::warning This mirrors the Events rule on purpose
-`eventsController.checkEventPermission` already says a chair may create committee-scoped events but **not** chapter-wide ones. Announcements now say the same thing. If either changes, change both — the same person being able to reach the whole chapter one way but not the other is worse than either rule alone.
+:::warning Cabinet gained reach, not authority over other people's posts
+Until 2026-09-04 a chair could only post to a committee they chaired. That restriction was deliberate and was **removed on purpose** — cabinet now has the same reach as eboard for *creating*. What did not change is editing and deleting: a chair still cannot touch somebody else's announcement, eboard's included.
+
+This asymmetry is why `checkAnnouncementPermission` was split into **`checkAnnouncementCreate`** and **`checkAnnouncementMutate`**. One function serving both could not be loosened for create without also loosening it for editing other people's posts.
 :::
 
-A chair attempting a chapter-wide post gets a **403, not a silent narrowing** to their committee. Someone who meant to tell everyone is better served by being told no than by quietly reaching six people.
+:::danger The `posted_by` arm is load-bearing
+A chapter-wide announcement has `committee_id NULL`, so the committee arm of `checkAnnouncementMutate` can **never** match it. Without the `posted_by` arm, a chair could publish to the entire chapter and then be locked out of editing or retracting their own post — something only eboard could take down. The same applies to `created_by` on events.
+:::
 
-Editing checks **two** committees: the one the announcement belongs to now, and the one the request is moving it to. With only a target check, a chair could edit any committee's announcement by re-pointing it at their own.
+This mirrors the Events rule on purpose (`checkEventCreate` / `checkEventMutate`). If either changes, change both — the same person being able to reach the whole chapter one way but not the other is worse than either rule alone.
+
+Editing checks **two** things: may you touch this row at all, against the row as it stands; and may you move it there, against what the request sets. With only a target check, a chair could capture any committee's announcement by re-pointing it at their own.
 
 Deleting a single media item follows the same rule as editing the announcement, so a chair is never left able to delete a whole post but not one photo from it.
 

@@ -203,7 +203,7 @@ Gained several columns beyond the original bare title/date/location shape:
 `events.committee_ids` is an **array** — one event can belong to several committees. `announcements.committee_id` is a **single nullable ID**. They're not symmetrical; don't assume one shape when querying across both.
 :::
 
-**Permission logic** (`eventsController.checkEventPermission`): eboard can set any `audience`/`committeeIds` combination; a committee chair can only scope to committees they chair — every ID must be one of theirs — and can't set `audience`; anyone else is forbidden. `title`/`start_date`/`end_date` are validated server-side before touching the DB.
+**Permission logic**, split in two since 2026-09-04. **`checkEventCreate`**: eboard and cabinet can both set any `audience`/`committeeIds` combination, including none at all for a chapter-wide event; naming a committee you do not chair is still refused; anyone else is forbidden. **`checkEventMutate`** (edit and delete): eboard, the event's `created_by`, or a chair of a committee it belongs to. ⚠ `updateEvent` previously ran only the create check, which reads the request body and never the stored row — so a chair could edit **any** event by sending `committeeIds` they chaired, silently reassigning it. It now loads the row first and runs both checks. `title`/`start_date`/`end_date` are validated server-side before touching the DB.
 
 ### `event_attendance` table
 
