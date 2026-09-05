@@ -36,3 +36,5 @@ Content lives in `docs/` as Markdown. Sidebar structure is in `sidebars.ts`; sit
 The site runs in Docker on the **Dokploy VM (10.0.0.7)** and is **rebuilt and redeployed automatically every night at midnight** by a scheduled job. Merging to `main` is enough; changes appear after the next nightly run. See [`docs/kronos/docs-site.md`](docs/kronos/docs-site.md) for the deployment and SSO details, including the Traefik forward-auth configuration that fronts the site.
 
 One gotcha documented there and worth repeating: Dokploy regenerates `/etc/traefik/config/dokploy-domains.yml` itself, so hand-edits to that file get silently reverted. Custom Traefik middleware belongs either in Dokploy's own per-app config UI or in a separate dynamic config file it doesn't manage.
+
+Attendance troubleshooting is documented in docs/api/endpoints.md (correlated attempt records) and docs/website/sign-in.md (writable cookie persistence). Update these with changes to the API or attendance actions; the historical incident remains unconfirmed pending production evidence.

@@ -320,3 +320,15 @@ A session at `/auth/start` does **not** mean the visitor is that person. Arrivin
 :::note Verify `next=` on the next real enrollment
 Authentik honours `?next=` on flow executors — its own internal redirects use it — but ours is an **absolute, external** URL, and some versions validate that against an allow-list. If it's ever rejected the failure is soft: the rushee simply stays on Authentik's page, exactly as before the parameter existed. Nothing breaks; they just have to find the site themselves.
 :::
+
+## Attendance refresh and cookie persistence
+
+The member check-in action and officer QR-code action use the server-only getActionAccessToken helper. It calls Auth.js's writable session update, persists replacement cookies (including chunked sessions), and reads the bearer from the updated cookie jar. The existing JWT callback still owns refreshing and deduplication. Access and refresh tokens are never added to browser session JSON.
+
+This avoids a reproduced mismatch: auth() can refresh internally, while a later getToken reading the incoming headers still returns the old bearer. The installed no-argument auth() path also does not forward its internal Set-Cookie response. A fresh browser session fetch can mask that problem, which explains why it is not universal.
+
+The writable accessor is for Server Actions/Route Handlers, not Server Component rendering. Other shared portal API helpers retain the prior path; this is a bounded attendance repair. The integration uses the installed unstable_update implementation, so run the website's scripts/test-attendance-auth.cjs regressions after upgrading Auth.js.
+
+On a missing/failed session or API 401, check-in redirects to login with its allowlisted destination preserved. The original QR can expire during login; sign-in does not extend it. A normal API 403 still reaches the check-in screen as a message. Unexpected errors return a safe message and a reference ID, correlated with website/API [checkin_attempt] records.
+
+Current callbacks refresh for imminent expiry or claims older than three minutes when invoked; a one-hour provider token lifetime is not the only refresh trigger and is not evidence that the historical check-in incident is fixed.

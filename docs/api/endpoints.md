@@ -600,7 +600,7 @@ Every roster row carries a live boolean saying whether that person is **still** 
 Without it, an officer working down the list marks somebody **absent** for a meeting they were uninvited from — and that absence then reads as fact. Hiding the row instead would be worse: it quietly rewrites who the event was for.
 :::
 
-The officer's status dropdown **stays usable** on a greyed row. Somebody who changed group last week may well still have walked through the door, and the officer standing in the room is the one who can see that. Only self check-in is refused.
+The officer's status dropdown **stays usable** on a greyed row. Somebody who changed group last week may well still have walked through the door, and the officer standing in the room is the one who can see that. Self check-in is also recorded; an audience mismatch is logged for officer review.
 
 `still_eligible` is computed from `AUDIENCE_MATCH_SQL` in `attendanceModel` — **the same string `syncRoster` uses**, deliberately shared rather than re-written. If the two ever drifted, the roster would materialise somebody and then immediately grey them out, which reads as the feature being broken rather than as a rule being applied.
 
@@ -649,25 +649,8 @@ The path param is a **rotating code**, not the stored token. It must match the c
 
 403s outside that window, on a stale code, or on the raw `attendance_token`. **404s on an event id that isn't a positive integer** — this id comes off a URL people point a phone camera at, and a torn poster or a half-decoded QR used to reach Postgres as `WHERE id = 'not-a-number'`, surfacing as a `500` with a stack trace in the logs and "Failed to check in" on the phone.
 
-:::danger The event's audience is now checked at the door
-Until 2026-09-03 this route asked only for a valid code and an open window, so **anybody holding a live code could join any roster** — a rushee who scanned an actives-only event was recorded as present on it, a row `syncRoster` would never have built.
-
-Eligibility is now `attendanceModel.isEligibleForEvent`, evaluated against the same `AUDIENCE_MATCH_SQL` the roster uses. A refusal is `403` with *"This event isn't open to your group."*
-
-It is also what makes the roster's grey-out honest: somebody who changed group since the event was created stays on the roster as a record of who was expected, and this is what stops them scanning back in underneath that.
-
-**Two cases fail OPEN, on purpose:**
-
-| Case | Answer | Why |
-|---|---|---|
-| `users.member_group IS NULL` | eligible | The account exists but no group has resolved — a brand-new member mid-signup, or an Authentik enrollment that assigned none. Turning away a real member standing at the board costs far more than admitting somebody an officer can unmark. |
-| No `users` row at all | eligible | This is the exact case self check-in **heals** from the caller's verified token, and it is the first thing a new member does at their first event. Refusing here would break the path this feature was fixed for. |
-
-A rushee is unaffected by either: their group *is* known, and `rush` matches no member audience.
-
-**And a third fallback, which is what stops this becoming a new "log out and log back in".** `isEligibleForEvent` reads `users.member_group`, and `/users/sync` writes that **only on first sign-in**. The `groups` claim on the bearer token comes from Authentik and refreshes with the token, so it is the *fresher* of the two. A rushee who has just been accepted as a pledge carries `pledge` in their token while the row still says `rush` — and would have been turned away at their first pledge event until they signed out and back in.
-
-So when the stored group says no, the call falls back to `eventModel.findByIdForUser` — the existing audience authority for "can this viewer see this event". Anything on their own calendar is something they may scan into. Reusing that rather than writing a fourth audience predicate is deliberate; this codebase has already been bitten by two that drifted. It only runs when the first check fails, so an ordinary scan is still one query.
+:::note Audience mismatch is recorded, not refused
+The controller checks stored eligibility and, if necessary, the verified token's groups for diagnostic context. If neither matches, it logs the mismatch and still records the scan. The officer can review the roster's eligibility indicator. Empty or stale groups do not themselves cause an attendance 403. Eligibility queries can still fail with a database exception, which is recorded as a separate diagnostic stage.
 :::
 
 :::danger A re-scan never overturns an officer
@@ -2166,3 +2149,12 @@ Upload errors additionally carry a machine-readable `code` (`upload_too_large`, 
 :::note `message` is the only key clients read
 The website extracts `err.message` and nothing else (`lib/portal-api.js`). An endpoint returning `{ "error": "..." }` will have its text silently replaced by a generic fallback — this was a real bug on the slideshow routes. Every upload router now goes through the shared `uploadErrorHandler` in `middleware/upload.js`, which emits `message` and quotes the route's real limit from `LIMITS_MB` rather than a hardcoded string.
 :::
+## Correlating a check-in failure
+
+The website sends X-Checkin-Attempt-Id with each attempt; direct API callers may supply a UUID or let the API generate one. The API returns X-Checkin-Attempt-Id and logs one [checkin_attempt] completion record for successful and failed responses, including failures before the controller. IDs are diagnostic only.
+
+The API record identifies event, verified user where available, HTTP status, stage, per-provider auth error code/claim, verified bearer time remaining, controller refusal reason, and repair/write outcome. A safe SQLSTATE is included for database exceptions. For a stale/wrong code, matchedBucketOffset searches only one future through six prior buckets, using the same timestamp as validation. Null means unrecognized in that range. Actual acceptance remains current plus previous 10-second bucket; diagnostics never grant attendance.
+
+The website record shares the ID and adds authentication/API/total durations, observed credential replacement and the exact outgoing token's unverified expiry delta. Find both records for a reference shown on the member's error screen. Do not copy the QR URL or bearer token. No API response (apiStatus null) is different from an API refusal. Completion logging cannot capture a process crash or a request that never finishes.
+
+Deploy the API and website changes together for complete correlation. No schema migration or Authentik configuration change is needed for this patch. It repairs a reproduced attendance credential-forwarding defect; the historical incident is not declared resolved without production evidence.
