@@ -25,7 +25,7 @@ oversight, and the reason is at the bottom of this page.
 | Manual | Actions > Run workflow | Actions > Run workflow |
 | Verification | ESLint + auth regression tests | Full test suite against a real Postgres |
 | Migration guard | Not applicable | Yes, blocks the deploy |
-| Health gate | Not yet | Polls `/health` |
+| Health gate | Polls `/api/health` | Polls `/health` |
 | Typical run | About 3 minutes | About 6 minutes |
 
 ## Website pipeline
@@ -45,7 +45,19 @@ Trigger: push to `main`, a nightly schedule, or a manual dispatch.
    deployed, and skips an older revision when a newer descendant was recorded,
    so a queued run cannot overwrite something newer. A manual dispatch ignores
    the marker, which is how you redeploy after changing the environment.
-4. **Build and swap**, then prune images and build cache older than a week.
+4. **Build and swap.**
+5. **Health gate.** Polls `/api/health` on the published port every 2s for up
+   to 60s. The port is read from `docker compose port web 3000` rather than
+   hardcoded, because compose publishes `${WEB_PORT:-3000}` and assuming 3000
+   would break silently the day that variable is set on the host.
+6. **Record and clean up.** The deployed-revision marker is written **only
+   after** the health gate passes, then images and build cache older than a
+   week are pruned.
+
+The marker ordering is load-bearing. Writing it before the health check would
+record a revision that never became healthy, and the next scheduled run would
+then skip it as already deployed, leaving the broken build in place until
+somebody noticed. A failed deploy has to stay retryable.
 
 ### Push deployment is off by default
 
@@ -111,15 +123,22 @@ build, not an API.
 An applied migration whose **file** is gone, usually after a rename, only
 warns. Deploying cannot fix that and the live schema is not wrong.
 
-### The health gate
+### The health gates
 
-`GET /health` runs `SELECT 1`, so a `200` proves the process serves traffic
-**and** can reach Postgres. "The container started" was the old signal, and it
-is the one that lied: a container with a wrong `DATABASE_URL` starts perfectly
-and then serves 500s.
+Both pipelines wait for the application to answer before reporting success,
+because "the container started" was the old signal and it is the one that
+lied.
 
-The gate polls rather than sleeping, because the API is usually up in a second
-or two and a fixed wait is either wasted time or too short.
+The website polls `GET /api/health`, which proves Next.js is serving rather
+than merely booted.
+
+The API polls `GET /health`, which additionally runs `SELECT 1`, so a `200`
+proves the process serves traffic **and** can reach Postgres. That distinction
+matters there: a container with a wrong `DATABASE_URL` starts perfectly and
+then answers 500s to everything.
+
+Both poll rather than sleep. Each app is usually up within a second or two, so
+a fixed wait would be either wasted time or too short.
 
 ## Why the two schedules differ
 
