@@ -530,189 +530,155 @@ Turning `requiresRsvp` back off does **not** delete the answers, matching how di
 
 ## Attendance
 
-QR-code check-in for events that opted in via `requiresAttendance`. Managing attendance is **eboard, cabinet (chairs), or the event's own creator** — `MAY_MANAGE_ATTENDANCE` in `attendanceController`. Checking yourself in is self-service for any member.
+Events with `requiresAttendance` enabled support QR check-in. Eboard, cabinet (chairs), and the event creator can manage attendance. Members can check themselves in while signed in.
 
-:::note Cabinet has full access, unlike event creation
-This used to be deliberately broader than the event-creation rule, which restricted a chair to committee-scoped events. Since 2026-09-04 `checkEventCreate` lets cabinet create anything, so the two now agree on creation and differ only on *editing somebody else's* event. Attendance is about **running the room**: a chair is usually the person standing at the front, and requiring the creator made the feature unusable whenever an eboard member had made the event on their behalf.
-:::
+Attendance permissions are defined by `MAY_MANAGE_ATTENDANCE` in `attendanceController`. Chairs can manage attendance for events created by someone else.
 
 ### `GET /events/:id/attendance/code`
 
-**Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs }` — encode as a QR pointing at `<site>/checkin/:eventId/:code`.
+**Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs }`. Encode a QR pointing to `<site>/checkin/:eventId/:code`.
 
-**The code rotates every 10 seconds.** Callers must re-fetch just after `expiresAt`; `AttendancePage.jsx` reschedules itself from that field and only polls while the QR overlay is actually open. Read the interval from `expiresAt` (or `periodMs`) rather than hardcoding it — the period has already changed once, and a client with 30 seconds baked in would sit on a dead code for 20 of them.
+Codes rotate every 10 seconds. Fetch a replacement just after `expiresAt`; use the response timing fields instead of hardcoding the interval. `AttendancePage.jsx` fetches a code when mounted and continues refreshing while the QR overlay is open.
 
-400s if attendance isn't enabled for the event.
+Returns `400` if attendance is not enabled for the event.
 
 ### `GET /events/:id/attendance`
 
-**Eboard, cabinet or event creator.** Returns `{ finalizedAt, records }` — the event's **materialised roster**, one record per expected attendee. Each record carries `user_id`, the frozen `display_name` and `member_group`, `status`, `checked_in_at`, `marked_by`, plus `username` and `profile_picture_asset_id` joined live from `users` for the avatar. A null `marked_by` means they self-checked-in via QR rather than being marked manually.
+**Eboard, cabinet or event creator.** Returns `{ finalizedAt, records }`. Read the roster from `data.records`; the response itself is not an array.
 
-:::info Records are grouped by status, then by last name
-The order is **present, excused, not marked, absent**, and alphabetical within each group. Absent sits last rather than beside "not marked" deliberately: absent is a decision somebody made, unmarked is a decision nobody has made yet, so the rows still needing a human stay above the settled ones.
+Each record includes:
 
-Ordered in SQL rather than in the client, because the iOS app reads this same endpoint and the portal treats the list as server-ordered — it uses the array index as a key tiebreaker for deleted accounts, which have no `user_id` to key on.
+- `user_id`, plus the saved `display_name` and `member_group`.
+- `status`, `checked_in_at`, and `marked_by`.
+- Current `username` and `profile_picture_asset_id` from `users` for the avatar.
+- `still_eligible`, which indicates whether the attendee still matches the event's audience.
 
-A consequence to expect rather than to fix: the portal re-polls every few seconds, so during QR check-in rows **move as people scan themselves in**.
-:::
+Records are sorted in SQL by status: present, excused, not marked, then absent. Each group is sorted by last name. Both the website and iOS app use this order. Rows can move as the portal refreshes during check-in.
 
-:::warning The response is an object, not an array
-It was a bare array until 2026-08-09. A client doing `Array.isArray(data) ? data : []` on the new shape gets `false` and renders an **empty roster with no error** — which is exactly what happened to the portal. Unwrap `data.records`.
-:::
+A deleted account has `user_id: null`. Its attendance record retains the saved name, but the status control is disabled because there is no user ID to address an update to.
 
-`user_id` is **null for a deleted account**: the row survives under its frozen name (`ON DELETE SET NULL`), so an event keeps the attendee it really had. There is no id left to address `PUT /events/:id/attendance/:userId` at, so those rows are read-only — the portal disables their status control.
+#### Unmarked attendees
 
-:::info `status: null` is a fourth state, and it is not `absent`
-Someone who never scanned and was never marked comes back with `status`, `checked_in_at` and `marked_by` all null — **"nobody has accounted for this person yet."** Rendering that as absent would make an event nobody took attendance for read as though the entire chapter skipped it, so the portal shows it as *Not marked* and `PUT` only accepts the three real statuses. There is no route back to null once someone is marked.
+An expected attendee who has neither scanned nor been marked has `status`, `checked_in_at`, and `marked_by` set to `null`. Display this as *Not marked*. It does not mean absent.
 
-This changed in 2026-08. It used to return **only rows that already existed in `event_attendance`**, so anyone who didn't show up was absent from the response entirely — you could not see who was missing, which is what made the roster UI necessary.
-:::
+The status endpoint accepts only `present`, `excused`, and `absent`. There is no endpoint to reset a marked attendee to `null`.
 
-:::info The roster is frozen into the table, not recomputed on read
-`attendanceModel.syncRoster` writes one row per expected attendee into `event_attendance` with `status` NULL, freezing `display_name` and `member_group` onto it. `findRosterForEvent` then does a pure read — no audience logic, no live group lookup.
+#### Saved roster and group changes
 
-That is not an optimisation. **Pledges are initiated mid-semester**, and a roster inverted from the audience on every read is correct only until somebody changes group: the day a pledge class becomes active, every past `audience: ["pledge"]` event silently loses its roster and every past `audience: ["active"]` event gains a dozen people who were never invited. Freezing is what keeps the history true.
+`attendanceModel.syncRoster` inserts expected attendees into `event_attendance` with a null status. It saves their display name and member group at that time. Later name or group changes do not overwrite those saved values.
 
-The controller re-syncs before each read **only while `attendanceFinalizedAt` is null**, so an unfinalized roster still picks up someone who joined the committee yesterday.
-:::
+The controller syncs before each roster read while `attendanceFinalizedAt` is null. This allows new eligible attendees to appear until the roster is finalized. Existing attendance rows remain even if the event's targeting changes.
 
-**Who lands on the roster** is the inverse of the calendar's visibility rule (`eventModel.findAllForUser`): an untargeted event addresses every member group, an `audience` array matches member groups, and `committee_ids` matches committee membership. Test, incomplete-profile and soft-deleted accounts are excluded.
+Expected attendees follow the calendar's audience rules:
 
-:::warning Chairs and eboard are implicitly `active`, and the roster has to say so
-`middleware/auth.js` `expandImpliedGroups()` treats chair and eboard as active, so a chair really does see an `audience: ["active"]` event. But the roster query only has `users.member_group` — a single resolved value where a chair is `'chair'` and nothing else. The obvious predicate:
+- An untargeted event includes every member group.
+- `audience` matches member groups.
+- `committee_ids` matches committee membership.
+- Test accounts, incomplete profiles, and soft-deleted accounts are excluded.
 
-```sql
-u.member_group = ANY(ev.audience)   -- WRONG
-```
+Chairs and eboard count as active members. `syncRoster` handles this with a SQL `CASE` because `users.member_group` stores a single group. A direct comparison of that column with `ev.audience` would omit chairs and eboard from active-member events. Keep this logic consistent with `expandImpliedGroups()` in `middleware/auth.js`; `test/attendanceRoster.test.js` covers it.
 
-**silently drops every chair and eboard member from an actives event's roster.** It looks correct and passes review. `attendanceModel.syncRoster` re-applies the implication with a `CASE`; `test/attendanceRoster.test.js` covers it, and that test was confirmed to fail against the naive version. If `expandImpliedGroups` changes, this changes with it.
-:::
+#### `still_eligible`
 
-One rule beyond the audience: **anyone with an existing `event_attendance` row stays on the roster regardless of targeting.** Audiences get edited after people have scanned, and an eboard member may check in to an event they were never targeted by — gating purely on the audience would hide a check-in the database already holds.
+This boolean reports whether the attendee currently matches the event's audience. It becomes false if they change to an ineligible group, leave the relevant committee, or delete their account. It uses the same `AUDIENCE_MATCH_SQL` as roster syncing.
 
-#### `still_eligible` — on the roster, but no longer in the group
+Use this flag for display, not to remove records. On an open roster, the portal greys out these rows and labels them *no longer in this group* or *account deleted*. Officers can still change the status of an existing account, and an audience mismatch does not refuse self check-in.
 
-Every roster row carries a live boolean saying whether that person is **still** one of the people this event is for. It is `false` once they change group, leave the committee the event was aimed at, or delete their account.
+Do not grey out a finalized roster based on current eligibility. Its saved membership describes the event at the time it was finalized. The API still returns `still_eligible`; `AttendancePage` uses `finalizedAt` to decide whether to apply the styling.
 
-**It is a display flag, never a filter.** Nothing is ever removed from a roster: `syncRoster` only ever `INSERT`s, and that is deliberate — the row records who was *expected when the event was made*, which is history. What changed is that the client now **greys those rows and labels them** (*"no longer in this group"*, or *"account deleted"*) instead of showing them indistinguishable from everybody else.
-
-:::danger Why the flag had to exist
-Without it, an officer working down the list marks somebody **absent** for a meeting they were uninvited from — and that absence then reads as fact. Hiding the row instead would be worse: it quietly rewrites who the event was for.
-:::
-
-The officer's status dropdown **stays usable** on a greyed row. Somebody who changed group last week may well still have walked through the door, and the officer standing in the room is the one who can see that. Self check-in is also recorded; an audience mismatch is logged for officer review.
-
-`still_eligible` is computed from `AUDIENCE_MATCH_SQL` in `attendanceModel` — **the same string `syncRoster` uses**, deliberately shared rather than re-written. If the two ever drifted, the roster would materialise somebody and then immediately grey them out, which reads as the feature being broken rather than as a rule being applied.
-
-:::warning The client must not grey a FINALIZED roster
-A finalized roster is history. Pledges are initiated mid-semester, so a live eligibility test applied to a past `audience: ['pledge']` event would grey out the entire pledge class the day they became active. `AttendancePage` gates on `finalizedAt`; the API returns the flag either way, because a model that answers a different question depending on a flag is how two callers end up disagreeing.
-:::
-
-`attendanceModel.findForEvent` still exists for the older "only what was recorded" shape; nothing calls it from the portal.
+`attendanceModel.findForEvent` retains the older response shape containing only recorded attendance. The portal does not use it.
 
 ### `PUT /events/:id/attendance/:userId`
 
-**Eboard, cabinet or event creator.** Body `{ "status": "present" | "excused" | "absent" }`. Upserts, so it works for someone with no existing record.
+**Eboard, cabinet or event creator.** Accepts `{ "status": "present" | "excused" | "absent" }`.
 
-:::danger …unless the roster is FINALIZED, and then it only updates
-The portal tells the officer, in as many words: *"It is frozen, and nobody new is added. Marks can still be changed."* Until 2026-09-03 only the first clause was enforced anywhere, and only against self check-in. Because this route upserts, a `userId` naming somebody who was never on the roster **materialised a fresh row on a closed event** — measured going 0 → 1 rows.
+On an open roster, this creates a record if needed. On a finalized roster, it updates existing records only, using `allowInsert: false`.
 
-On a finalized event the model now runs a plain `UPDATE` (`allowInsert: false`), so:
+| Target | Result on a finalized roster |
+| --- | --- |
+| Already on the roster | `200`; status remains editable |
+| Existing member not on the roster | `403`; reopen the roster before adding them |
+| Member no longer exists | `404` |
 
-| Target | Result |
-|---|---|
-| Already on the roster | `200` — marks stay editable, which is the whole reason officers finalize at all |
-| Not on the roster | `403` *"…nobody new can be added. Reopen it to add them."* |
-
-The 403 is deliberately a **different sentence** from the `404` for a member who no longer exists. One is fixed by reopening the roster and the other never is; telling an officer "that member no longer exists" about somebody standing in front of them sends them after the wrong problem.
-
-**The web UI could never reach this** — it renders only rows the roster already holds. iOS builds the URL itself, which is why the rule had to live at the API.
-:::
+These rules are enforced by the API, including for callers that construct their own update URLs.
 
 ### `PUT /events/:id/attendance-finalized`
 
-**Eboard, cabinet or event creator.** Body `{ "finalized": true | false }` → `{ finalizedAt }` (null when re-opened). 400s if attendance isn't enabled for the event, or if `finalized` isn't a boolean.
+**Eboard, cabinet or event creator.** Accepts `{ "finalized": true | false }` and returns `{ finalizedAt }`. The timestamp is null when the roster is reopened.
 
-Finalising freezes the roster: syncing stops, so nobody is added or removed afterwards no matter how the chapter's groups change. It is deliberately **an explicit button rather than something that happens at the event's end** — and it is reversible, because a mis-click on the wrong event should not need SQL to undo. Un-finalising only re-opens syncing; it never deletes a row, so no recorded mark is lost either way.
+Returns `400` if attendance is disabled or `finalized` is not a boolean.
 
-:::warning Finalising syncs first, on purpose
-`setAttendanceFinalized` calls `syncRoster` before freezing. Without it, finalising an event whose roster was never opened would freeze an **empty** roster — recording that nobody was expected at a meeting the whole chapter was invited to.
-:::
+Finalizing syncs the roster once, then stops further additions. Existing statuses remain editable. Syncing first ensures that an event whose roster has never been opened still includes its expected attendees.
 
-The accepted cost of a manual finalise is that an event nobody finalises keeps drifting, so the portal marks past events that were never finalised.
+Finalization is manual and reversible. Reopening resumes syncing without deleting records or changing existing marks. Past events that have not been finalized remain subject to group changes and are labelled *Not finalized* in the portal.
 
 ### `POST /checkin/:eventId/:token`
 
-**Any member.** Self check-in, hit after scanning the QR while signed in.
+**Any signed-in member.** Records a self check-in after a QR scan.
 
-The path param is a **rotating code**, not the stored token. It must match the current 10-second period or the one immediately before it (so it is valid for between 10 and 20 seconds, the grace covering the gap between the board rendering it and the scan reaching us). The current time must also fall inside the check-in window: from **30 minutes before the event's start** to **30 minutes after its end**.
+The `token` path parameter is a rotating code derived from the event's attendance secret. The stored `attendance_token` is never accepted directly. A code must match the current 10-second bucket or the previous one, giving it 10 to 20 seconds of validity from generation. Less time may remain when it is scanned.
 
-403s outside that window, on a stale code, or on the raw `attendance_token`. **404s on an event id that isn't a positive integer** — this id comes off a URL people point a phone camera at, and a torn poster or a half-decoded QR used to reach Postgres as `WHERE id = 'not-a-number'`, surfacing as a `500` with a stack trace in the logs and "Failed to check in" on the phone.
+Check-in opens 30 minutes before the event starts and closes 30 minutes after it ends. The API generates and validates codes using server time; the scanning phone's clock is not an input.
 
-:::note Audience mismatch is recorded, not refused
-The controller checks stored eligibility and, if necessary, the verified token's groups for diagnostic context. If neither matches, it logs the mismatch and still records the scan. The officer can review the roster's eligibility indicator. Empty or stale groups do not themselves cause an attendance 403. Eligibility queries can still fail with a database exception, which is recorded as a separate diagnostic stage.
-:::
+| Condition | Response |
+| --- | --- |
+| Invalid or missing authentication | `401` |
+| Invalid event ID or event not found | `404` |
+| Attendance disabled, missing attendance secret, or invalid/expired code | `403` |
+| Outside the check-in window or roster finalized | `403` |
+| Attendance write or required lookup fails | `500` |
 
-:::danger A re-scan never overturns an officer
-`event_attendance.marked_by` is non-null **only** when somebody set the row by hand from the roster, so it is the record of a human decision. Check-in's `ON CONFLICT` therefore leaves both `status` and `marked_by` alone whenever `marked_by` is already set: someone an officer marked **excused** stays excused, and someone marked **absent** stays absent until an officer changes it.
+The controller checks audience eligibility for its logs but records the scan even when the attendee does not match. Empty or stale groups do not themselves cause a refusal. Eligibility queries can still fail with a database error.
 
-Until 2026-09-02 the upsert was `SET status = 'present', checked_in_at = NOW(), marked_by = NULL`, so a second scan did not merely reverse the officer's decision — it erased the attribution, leaving nothing for anyone to notice. A member told "I'll mark you excused" who then scanned out of habit silently undid it.
+#### Repeat scans and officer marks
 
-**The guard is `marked_by IS NOT NULL` OR `status IN ('excused','absent')`, and the second half is not redundant.** `marked_by` is `REFERENCES users(authentik_id) ON DELETE SET NULL`, so deleting an officer's account NULLs it on **every row they ever marked** — silently turning their decisions back into "a self-scan" and making them overwritable again. That was measured, not theorised: with only the `marked_by` test, deleting the officer let a re-scan flip an excused member to present. Self check-in writes **only** `'present'`, so an `excused` or `absent` row can only have come from a person, whatever became of their account.
+A repeat scan preserves the first `checked_in_at` time. It also preserves `status` and `marked_by` when either:
 
-`checked_in_at` is `COALESCE`d for the same reason `setStatus` does it: the **first** scan is when they actually arrived, and re-scanning because the page was slow must not relabel that as ten minutes later.
+- `marked_by IS NOT NULL`, indicating an officer's mark.
+- The existing status is `excused` or `absent`.
 
-The trade goes both ways and is deliberate: somebody marked absent who then turns up and scans **stays absent** until an officer changes it. The officer is the one who can see the room.
+The status check is needed because deleting an officer sets `marked_by` to null. Their previous absent or excused marks must still be preserved.
 
-**The request still succeeds.** The rule is written as a SQL `CASE`, not a `WHERE` on the `DO UPDATE`, so the statement always `RETURN`s its row — `selfCheckIn` reads an empty result as "nothing was recorded" and answers `500`, so a guarded update would show "you are already marked excused" as "we could not record your check-in". Clients must read `record.status` rather than assuming `"present"`; the portal's confirmation screen says *"You're marked excused"* rather than *"You're checked in!"* when it differs.
-:::
+A member already marked absent or excused stays that way after scanning until an officer changes the status. The request returns the existing record successfully, so clients must read `record.status` instead of assuming every `200` means present.
 
-:::info Why this changed
-The QR previously encoded the raw `attendance_token`, which never rotates. Photographing the board therefore produced a credential that worked **from anywhere** until 30 minutes after the event ended, so a member could text it to somebody at home and have them check in. Attendance carries real chapter consequences, so that was worth closing.
+The SQL upsert uses `CASE` expressions to preserve marks while still returning the row. A conditional update that returned no row would be treated by `selfCheckIn` as a failed write.
 
-Note what was never broken: check-in requires auth, so a scanner is always recorded as **themselves**. Nobody could ever check in *as* another member. The flaw was purely in relaying proof-of-presence.
+#### QR sharing
 
-**No client clock is involved** — the same server derives and validates the code, so there is no skew to tolerate.
+Rotating codes limit how long a screenshot can be used by someone outside the room. They replace the earlier QR format that exposed the event's fixed attendance token. The URL shape is unchanged for existing scanners.
 
-**The URL shape is unchanged**, so the iOS scanner needed no update. It parses the scanned URL and posts immediately, and has no retry queue that a 60-second lifetime could strand.
-:::
-
-**What this does not solve:** a member checking in and then leaving. That needs a check-out step, not a better code.
-
-Regular members get no attendance **management** UI — only chairs and eboard see the Attendance surface in the portal — but since 2026-09-02 they can see **their own** recorded status on the calendar.
+Authentication identifies the member making the request. Rotation limits reuse of the code; it does not detect someone checking in and then leaving.
 
 ### `myAttendance` on `GET /events`
 
-`"present"`, `"excused"`, `"absent"`, or `null`. Attached by `eventsController.getEvents` in **one** batched query for the whole page (`attendanceModel.findMyStatusesForEvents`), on the same seam as `myRsvp` and `canRsvp`.
+Each event includes the caller's recorded status: `"present"`, `"excused"`, `"absent"`, or `null`.
 
-It is deliberately **not** set in `eventModel.toCalendarEventJSON`, which has no idea who is asking. So `GET /events/:id` and the ICS feed do not carry the key at all, rather than carrying a copy that could only ever be null — and a field that is always null is indistinguishable from "nothing was recorded", which is the exact confusion this exists to end.
+`eventsController.getEvents` adds this through one batched call to `attendanceModel.findMyStatusesForEvents`. The query excludes rows with a null status, so being on the expected roster does not appear as recorded attendance.
 
-:::warning A `NULL` status is reported as `null`, not as attendance
-`syncRoster` materialises a row for **everybody an event is for**, with `status NULL` meaning "expected, nobody has accounted for them yet". The query filters those out with `status IS NOT NULL`. Dropping that filter would put a tick on every event a member was merely *invited* to — which is worse than no tick, because it is precisely the reassurance somebody goes looking for after a scan that did not land.
-:::
+The field is specific to the caller. It is not part of `eventModel.toCalendarEventJSON` and is not included in `GET /events/:id` or the ICS feed.
 
-`EventsCalendar.jsx` renders it in the slot the "Attendance" badge already occupied, so a card gains no fourth badge: *Checked in* (emerald), *Excused* (amber), *Marked absent* (rose), or the plain *Attendance* badge when nothing is recorded. Those strings are first-person and intentionally differ from `AttendancePage`'s roster labels (*Present* / *Absent*) — one is a member looking at themselves, the other an officer looking at other people. **Do not merge the two maps.**
+`EventsCalendar.jsx` displays *Checked in*, *Excused*, or *Marked absent*. When no status is recorded, it shows the plain *Attendance* badge. Keep these labels separate from the officer roster's *Present* and *Absent* labels.
 
-This is the only surface where a member can confirm a scan landed. Check-in reports success on a page they close immediately and the roster is officer-only, so throughout the window where check-in was silently recording nothing (fixed 2026-09-02) there was nowhere that would have shown it.
+Regular members can use the calendar to confirm their own status. The attendance management screen is shown to chairs and eboard.
 
 ### The portal screen
 
-`components/portal/AttendancePage.jsx`, mounted at `/member/attendance` and `/admin/attendance`. **Upcoming / Past tabs** over a scrollable **event rail** on the left, and the **roster** on the right.
+`components/portal/AttendancePage.jsx` is mounted at `/member/attendance` and `/admin/attendance`. It has Upcoming and Past tabs, an event list on the left, and the selected roster on the right.
 
-Live events sit under *Upcoming* with their own "Happening now" heading and a pulsing Live pill, rather than in a tab of their own: a meeting that started ten minutes ago is the one you're taking attendance at, so it has to be on the tab the page opens on. The tab itself defaults to whichever side has events, so a chapter with nothing coming up lands on *Past* instead of an empty pane. Selection follows the visible tab, and only moves when the chosen event isn't in it — a refresh never yanks the pane away from a deliberate pick.
+Live events appear under Upcoming with a *Happening now* heading. The initial tab uses whichever group has events. Refreshing keeps the selected event unless it is no longer in the visible tab.
 
-**Show QR code** opens a fullscreen overlay that hides the roster behind it, closed with the button or `Esc`. That separation is the point: the QR goes on a projector in a room full of people, and the roster beside it is chapter-wide attendance.
+**Show QR code** opens a fullscreen overlay, closed by its button or `Esc`. The overlay hides the roster so it is not projected with the QR.
 
-**Finalize roster / Reopen roster** sits beside it and calls `PUT /events/:id/attendance-finalized`. A finalised event says so in the header with the date; an event that is over and *not* finalised gets an amber **"Not finalized"** pill in the rail, a matching dot on the Past tab, and a line in the header explaining that the roster still changes as people move between groups. That is the one state where a roster silently keeps drifting, so it is the one state the UI insists on showing.
+**Finalize roster** and **Reopen roster** call `PUT /events/:id/attendance-finalized`. Finalized events show the date. Past events that remain open show a *Not finalized* indicator and explain that their rosters can still change.
 
-On screens below `lg` the rail collapses to a labelled dropdown above the roster rather than stacking a full-height event list on top of it.
+Below the `lg` breakpoint, the event list becomes a labelled dropdown above the roster.
 
-Four things worth not undoing:
+When editing this screen:
 
-- **The QR renders on a literal white background** (`bg-white`, not `bg-card`). A QR on a dark surface does not scan.
-- **Row busy state is per person, not per roster.** Taking attendance means marking people in quick succession; a single shared flag disabled all ~80 dropdowns for each round trip, so the next person you reached for was always greyed out.
-- **Names come from the frozen `display_name`, not from the live user fields.** `memberDisplayName()` reads `preferred_name`/`first_name`/`last_name`, which roster records don't have — a `rosterPerson()` shim maps the frozen name onto that shape. Reading the live fields would defeat the freezing.
-- **A record whose `member_group` is null says "Group not recorded"**, never "Member". The migration deliberately left the group null on rows that predate freezing rather than stamping today's value, and `formatMemberGroup(null)` returns `'Member'` — which would assert exactly the wrong thing.
+- Keep the QR background white for scanning contrast.
+- Track pending status updates per attendee so one request does not disable the entire roster.
+- Use the saved `display_name`. The `rosterPerson()` helper adapts it for `memberDisplayName()`; roster records do not contain the live first-name and last-name fields.
+- Display a null `member_group` as *Group not recorded*. Older records may lack this value; the generic *Member* fallback would imply a known group.
 
 ---
 
