@@ -684,124 +684,114 @@ When editing this screen:
 
 ## Committees
 
-DB-only membership (no Authentik group per committee) — same shape as Group Chats below.
+Committee membership is stored in Postgres, not in separate Authentik groups. These routes require authentication and a group in `SHARED_ALBUM_GROUPS`: active, chair, alumni, eboard, or pledge. Additional permissions are listed below.
 
-**A committee has no group chat of its own** (changed 2026-08-24). A chat records which committees it belongs to in `committee_ids`, and `membershipPredicate` derives its members from that at READ time — so it follows people joining and leaving with nothing to reconcile.
+Committees do not have dedicated group chats. A chat can reference committees through `committee_ids`; `membershipPredicate` checks their membership when the chat is read. Joining or leaving a committee changes access to those chats without syncing individual chat-member rows.
 
-The old mechanism is fully gone: no auto-created chat, no `committees.group_chat_id` (dropped in `1789200000000`), no `syncGroupChatMembership`, and deleting a committee no longer deletes a chat. It was the same materialise-one-row-at-a-time shape as the Eboard chat automation removed in `1788800000000`, and it was replaced for the same reason.
+The former `committees.group_chat_id` column and `syncGroupChatMembership` function have been removed. Deleting a committee does not delete a chat.
 
 ### `GET /committees`
 
-**Auth required.** All committees, with member count and whether the caller is a member/chair of each.
+Returns all committees, their member counts, and whether the caller is a member or chair of each.
 
 ### `GET /committees/activity`
 
-**Auth required.** Per-committee "what is new for me", backing both the Committees page markers and the sidebar badge:
+Returns per-committee counts for the Committees page and sidebar badge:
 
 ```json
 [{ "committee_id": "3", "new_count": 2, "pending_count": 0 }]
 ```
 
-- `new_count` — **events and announcements** targeted at that committee, created since the caller last opened it, excluding their own posts. Deliberately **only the caller's own committees**; eboard is *not* `seesEverything` here, or their badge would never be zero.
-- `pending_count` — join requests the caller can actually action (eboard anywhere, or chair of that committee), never including their own request. Present for committees eboard is not a member of, since they are the people most likely to clear the queue.
+- `new_count`: events and announcements created since the caller last opened that committee, excluding their own posts. Only the caller's committees contribute, including for eboard.
+- `pending_count`: join requests the caller can approve or deny, excluding their own request. Eboard can act on requests for any committee; a committee chair can act on requests for that committee.
 
-The two are returned separately and only the sidebar adds them: one is news to read, the other people waiting on you.
+The API returns these counts separately. The sidebar adds them together. Committee events and announcements can also contribute to the Calendar and Announcements badges; that overlap is intended.
 
-:::warning Registered above every `/:id` route, and must stay there
-Express matches `/:id` against a single segment, so a later `GET /committees/:id` would answer `/activity` with the committee handler and look up a committee whose id is the string `"activity"`. There is no `GET /:id` today — which is exactly why this is worth stating, since the trap only springs when someone adds one. Same failure the homepage-photos `/collections` route hit.
-:::
-
-**Both signals already badge other tabs** — a committee event also counts toward Calendar, a committee announcement toward Announcements. That overlap is intended and was chosen explicitly; it is not a double-counting bug to fix.
+Register `/activity` and `/slugs` before any future `GET /:id` route so Express does not treat those names as committee IDs.
 
 ### `POST /committees/:id/seen`
 
-**Auth required.** Marks one committee read, called when a member opens its detail view — *not* when they open the Committees page. `204` on success, `404` if the committee does not exist.
+Marks a committee as read for the caller. The portal calls this when the committee's detail view opens, not when the Committees list opens.
 
-No membership check, deliberately: the cursor is private to the caller and grants nothing, a row for a committee they are not in is never selected by the activity query, and requiring membership would `403` the legitimate case of eboard opening a committee they do not belong to.
+Returns `204` on success or `404` if the committee does not exist. Committee membership is not required: this only updates the caller's read position and grants no access. This also allows eboard to open committees they do not belong to.
 
 ### `POST /committees`
 
-**Eboard only.** `{ "name": "..." }`
+**Eboard only.** Accepts `{ "name": "..." }`.
 
 ### `DELETE /committees/:id`
 
-**Eboard only.** Also deletes the linked group chat.
+**Eboard only.** Deletes the committee. Returns `204` on success or `404` if it does not exist. Group chats are not deleted.
 
 ### `POST /committees/:id/join`
 
-Self-service — adds the caller as `role: "member"` (no-op if already a member).
+Submits a join request for the caller. Returns `202` with `{ "status": "requested" }`; membership is granted only after approval by eboard or that committee's chair.
+
+Returns `204` without creating a request if the caller is already a member, or `404` if the committee does not exist.
 
 ### `DELETE /committees/:id/leave`
 
-Self-service — removes the caller (and from the linked group chat).
+Removes the caller from the committee and returns `204`. Chat access is recalculated from committee membership rather than updated through a linked-chat sync.
 
 ### `GET /committees/:id/members`
 
-Any current member can view.
+Returns the committee's members. Any caller allowed through the committee router can view the list; they do not need to belong to that committee. Returns `404` if the committee does not exist.
 
 ### `PUT /committees/:id/members/:userId/role`
 
-**Eboard only.** `{ "role": "chair" | "member" }` — auto-adds the target user as a committee member first if they aren't already one.
+**Eboard only.** Accepts `{ "role": "chair" | "member" }`. Adds the target user to the committee if needed, then sets their role.
+
+Returns `204` on success, `400` for an invalid role, or `404` if the committee or user does not exist.
 
 ### Committee slugs
 
-A **slug** is a committee's stable machine name. It is how a feature says "the committee that does X" without hardcoding a committee id or matching on a name eboard can rename. At most **one** committee carries any given slug, enforced by the partial unique index `committees_slug_key` (migration `1789000000000`).
+A slug identifies a committee used by a feature, independent of its numeric ID or display name. Each committee can hold one slug. The partial unique index `committees_slug_key` ensures that a slug belongs to at most one committee.
 
-The registry lives in **`services/committeeSlugs.js`** and is the extension point:
+`services/committeeSlugs.js` defines the available slugs:
 
-| Slug | Grants |
-|---|---|
-| `pledge` | The [rushee interest form data](#rushee-interest-form-data), the per-rushee profile, the decision-night deck and write-up, and interview signup. |
+| Slug | Access |
+| --- | --- |
+| `pledge` | [Rushee interest form data](#rushee-interest-form-data), rushee profiles, the decision-night deck and write-up, and interview signup. Individual features also check the caller's role. |
 | `judicial` | The [member report queue](#reports--moderation), including resolving and dismissing reports. |
 
-:::tip Adding a committee-specific feature later is one entry and one migration
-Add a key to `COMMITTEE_SLUGS` and gate the new feature on it. Everything else is already generic and reads the registry: `committeeModel.isSlugMember` / `isSlugChair` take the slug as an argument, `GET /committees/slugs` publishes it, and the committees page renders a "no *X* is set" notice for any slug no committee holds — with no website change at all.
-
-The full cost of a third slug is that entry, the permission check in whatever it gates, and a **data migration pointing the slug at a committee**. No column, no new route.
-:::
-
-Because the index is unique on the **value**, `pledge` and `judicial` sit on two different committees quite happily. A committee still holds at most one slug, because `slug` is a single column — claiming a second one on the same committee replaces the first.
+To add a committee-specific feature, add an entry to `COMMITTEE_SLUGS`, implement its permission check, and assign the slug through a data migration. `committeeModel.isSlugMember` and `isSlugChair` accept the slug as an argument. The registry endpoint and committee-page notices use the registry without a separate list of known slugs.
 
 ### `GET /committees/slugs`
 
-**Eboard only.** The registry as `[{ slug, label, description }]`.
+**Eboard only.** Returns the registry as `[{ slug, label, description }]`.
 
-It reports which grants **exist** and what each one hands over. It deliberately does **not** report who holds them: `slug` already rides on every committee shape from `GET /committees`, so the website joins the two client-side rather than this becoming a second, staler answer to the same question.
+This endpoint describes the available permissions. Assignments come from the `slug` field on `GET /committees`. The committee page combines the two responses and shows a notice for each unassigned slug.
 
-Its one consumer is the committees page, which renders an amber "no *pledge committee* is set" notice for every registry entry no committee holds. That is what makes the "one entry" promise true on the **website** side too — before it existed the page hardcoded `slug === 'pledge'`, so the judicial slug shipped with no notice at all: an unassigned grant that nothing anywhere mentioned.
+#### Assigning a slug
 
-:::danger There is NO route that writes `committees.slug`, and that is the design
-A slug decides who reads every rushee's GPA and the chapter's entire conduct record. It was briefly settable from a switch on the committee detail page. That switch, its `PUT /committees/:id/slug` route, the `PUT /committees/:id/pledge` alias and `committeeModel.setSlug` were **all removed** — if you are reading an older copy of this page describing them, that copy is wrong.
+There is no HTTP endpoint or portal control for assigning slugs. The former `PUT /committees/:id/slug`, `PUT /committees/:id/pledge`, and `committeeModel.setSlug` paths were removed. Assignments grant access to sensitive member data and are changed through a reviewed migration or SQL change at deployment.
 
-One stray click moved the conduct record to another committee, and nothing downstream could tell that from an intentional change. No confirmation dialog fixes it: the API cannot know which clicks were meant.
-
-The binding changes at **deploy time**, which makes it an act with an author, a diff and a reviewer:
+Move a slug by clearing its current assignment before setting the new one, in a single transaction:
 
 ```sql
 BEGIN;
-UPDATE committees SET slug = NULL       WHERE slug = 'judicial';
+UPDATE committees SET slug = NULL      WHERE slug = 'judicial';
 UPDATE committees SET slug = 'judicial' WHERE id = <the committee>;
 COMMIT;
 ```
 
-Both statements, in that order, in one transaction. `committees_slug_key` is a **partial** unique index, so moving a slug must clear before it sets: a single `UPDATE` with a `CASE` can fail on a duplicate that only ever existed mid-statement, and a partial unique **cannot be made `DEFERRABLE`** — that applies to constraints, and a partial unique can only be an index. Use one checked-out connection, never `query()` per statement, or `BEGIN` and `COMMIT` land on different pooled sessions and quietly do nothing.
+Replace `<the committee>` with the reviewed target ID. Use one checked-out database connection for the whole transaction. Separate pooled `query()` calls may run on different connections.
 
-`test/rushInterestData.test.js` and `test/judicialReports.test.js` both assert the write path stays gone. If you are here because you want it back, read `services/committeeSlugs.js` first.
-:::
+The clear-then-set order avoids a temporary duplicate under `committees_slug_key`. This partial unique index cannot be made deferrable, so do not combine the move into a single `UPDATE ... CASE` statement.
 
-:::warning A migration that assigns a slug must decline to guess
-`1789000000000` (pledge) and `1789100000000` (judicial) both seed by name and both do **nothing** unless exactly one committee matches. Zero matches, two matches, a slug already assigned, or a candidate already carrying a different slug all leave every row untouched.
+`test/rushInterestData.test.js` and `test/judicialReports.test.js` check that the HTTP write paths remain unavailable.
 
-Doing nothing is recoverable: the committees page shows an unmissable notice until somebody sets it. Guessing wrong is not — it silently hands rushee GPAs or the conduct record to a committee that should never have seen them.
+#### Assignment migrations
 
-**Shipping the code without the assignment migration is the failure mode this whole design exists to avoid.** `can_view_rush_data` shipped switched off and the Rushee Data table was eboard-only for weeks while everyone assumed it worked.
-:::
+The pledge migration `1789000000000` and judicial migration `1789100000000` assign by name only when exactly one eligible committee matches. They leave rows unchanged if there are zero or multiple matches, the slug is already assigned, or the candidate holds another slug. An unassigned slug appears as a notice on the committee page.
 
-`slug` rides on **every** committee shape, not just an admin one, so the website badges it on the committee card for all members. An access grant nobody can see is one nobody audits — and removing the switch must not also remove the ability to notice it is pointed at the wrong committee.
+Include the assignment migration when deploying a feature that depends on a slug. The feature's permission checks cannot grant committee access until the assignment exists.
 
-:::info `can_view_rush_data` still exists, and is dead
-Phase 1 of 2. The column is still on the table and still in the projection, so a client mid-deploy does not see the key vanish — but **no permission check reads it any more**. Dropping it is a new migration; `1789000000000` is deployed and therefore frozen.
-:::
+Every committee response includes `slug`, so members can see the assignment on the committee card even though they cannot edit it.
+
+#### Legacy `can_view_rush_data` field
+
+`can_view_rush_data` remains in the table and response for compatibility, but permission checks no longer use it. Removing it requires a new migration; do not edit the already-deployed `1789000000000` migration.
 
 ---
 
