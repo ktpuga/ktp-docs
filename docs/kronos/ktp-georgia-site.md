@@ -6,39 +6,24 @@ sidebar_position: 1
 
 ## Overview
 
-The **ktpgeorgia.com** website is deployed on an isolated LXC container on Kronos (ID: 116).
+The documented host for `ktpgeorgia.com` is LXC 116 on Kronos. A self-hosted GitHub runner builds and deploys the Docker container when changes reach `main`.
 
-The deployment uses a self-hosted GitHub runner and Docker to automatically deploy on a push to main.
-
-The workflow is located at `.github/workflows/deploy.yml`.
-
----
+The deployment workflow is `.github/workflows/deploy.yml`.
 
 ## Deployment Flow
 
-1. Developer pushes changes to GitHub repository
-2. GitHub triggers workflow
-3. GitHub Runner rebuilds containers
-4. Updated container is deployed automatically
-5. Production site updates
+1. Push or merge changes to `main`.
+2. GitHub Actions starts the deployment workflow.
+3. The self-hosted runner builds the image and replaces the running container.
 
-No manual git pulling should be required on the server.
-
----
+Use this workflow for routine deployments so the deployed version can be traced to a GitHub run.
 
 ## Troubleshooting
 
 ### Changes pushed but not visible on production
 
-Check:
-
-- GitHub repo permissions for admin@ugaktp.com
-- GitHub workflow logs
-- Deployment status
-- Container health
+Check the workflow run for the expected commit, the runner's status, build and deployment logs, and container health. If the workflow cannot access the repository, check the permissions for `admin@ugaktp.com`.
 
 ## Notes for Infrastructure Committee
 
-- Do NOT revert to manual Git deployment
-
----
+Keep routine deployment changes in the workflow. Manual server-side pulls bypass the recorded deployment process and can leave the checkout out of sync.

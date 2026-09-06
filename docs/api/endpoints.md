@@ -1693,10 +1693,14 @@ Request body:
 
 ```json
 {
-  "action": "model_deleted",
-  "model": {
-    "model_name": "user",
-    "pk": 42
+  "event": {
+    "action": "model_deleted",
+    "context": {
+      "model": {
+        "model_name": "user",
+        "pk": 42
+      }
+    }
   }
 }
 ```

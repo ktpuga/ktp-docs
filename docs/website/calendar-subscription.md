@@ -4,77 +4,63 @@ sidebar_position: 9
 
 # Calendar Subscription
 
-Members can subscribe to their chapter calendar from Apple Calendar, Google Calendar or Outlook. Every event they're allowed to see appears in their own calendar app and keeps updating on its own, with no further action.
+Members can subscribe to their chapter calendar in Apple Calendar, Google Calendar, or Outlook. In **Settings → Calendar Subscription**, create a link and choose **Subscribe**. The `webcal://` URL requests a subscription rather than a one-time file download.
 
-Set it up in **Settings → Calendar Subscription**. The member creates a link, clicks **Subscribe** (a `webcal://` URL, which is what makes a client subscribe rather than download a one-off snapshot), and that's it.
+## Calendar feeds and meetings {#why-this-instead-of-calendly}
 
-## Why this instead of Calendly
-
-Calendly was never going to do this. It writes to exactly two calendars — the account owner's and the booker's — and has no idea the chapter roster exists, so a chapter event created in the portal could never reach a member's calendar through it. That's a *calendar feed* problem, which is a completely different mechanism. Calendly was removed entirely on 2026-08-02 (migration `1786300000000`) once this and [meetings](./meetings.md) had replaced both halves of it.
+The feed adds visible chapter events to a member's calendar. [Meetings](./meetings.md) handles scheduling and invitations. Together they replaced the former Calendly integration, removed by migration `1786300000000`.
 
 ## The URL is the credential
 
-`GET /calendar/feed/:token.ics` is **unauthenticated**. It is the only unauthenticated read path in the API that returns member-visible data, and that is deliberate: a calendar client cannot log in, hold a session, or refresh an access token. It stores a URL, sometimes for years, and re-fetches it on a schedule of its own choosing. An access token would expire within the hour with nothing able to renew it.
+`GET /calendar/feed/:token.ics` does not require a bearer token. Calendar clients fetch the subscription URL without going through the website's login flow.
 
-So `users.calendar_feed_token` is a dedicated credential rather than a reused JWT:
+`users.calendar_feed_token` is a separate credential with these properties:
 
-- **32 bytes of CSPRNG output, base64url.** Unguessable, not merely unique. A UUID would be fine on entropy but reads as an identifier, and people treat identifiers as safe to paste into shared documents.
-- **Single purpose.** It grants exactly one capability: read this person's visible events. It cannot be used against any other endpoint.
-- **Revocable independently.** Regenerating the token is what revokes a leaked link. It doesn't touch their password or session, and every client subscribed to the old URL starts 404ing immediately.
-- **NULL until requested.** Generating one for everybody up front would create hundreds of live credentials nobody asked for.
-- **Cleared by `anonymize()`.** Otherwise a deleted account's calendar would keep serving chapter events forever. `findByCalendarFeedToken` also checks `deleted_at IS NULL` as a second line.
+- Generated from 32 random bytes and encoded as base64url.
+- Grants access only to that user's calendar feed.
+- Created when requested rather than for every account.
+- Replaced by `POST /calendar/feed`; the previous URL then returns `404`.
+- Cleared during account anonymization. Token lookup also excludes deleted users.
 
-`POST /calendar/feed` both creates and regenerates, on purpose — they're the same operation, and a separate "regenerate" route would imply the old link survives until you call it.
+Keep feed URLs private. Regenerate a disclosed link and update subscriptions that used the old one.
 
-## It cannot leak more than the portal
+## Feed visibility {#it-cannot-leak-more-than-the-portal}
 
-The feed calls `eventModel.findAllForUser`, the **same** function the portal and iOS app use. It does not reimplement the audience filter. Doing so would make it a second place visibility can be wrong, and a wrong answer in a calendar feed is one that keeps getting re-fetched for months.
-
-A rushee's feed therefore contains rush-targeted events and nothing else, for exactly the same reason their portal calendar does. `test/calendarFeed.test.js` asserts this against a real database, including that internal event titles don't appear anywhere in the rendered file.
+Chapter events come from `eventModel.findAllForUser`, which also filters portal events. Rushees receive only events visible to their group. `test/calendarFeed.test.js` checks that internal titles do not appear in a rushee's feed.
 
 ### Three sources, one rule each
 
-`getFeed` merges chapter events with two tables that deliberately live outside `events`:
+| Source | Function | Included when |
+| --- | --- | --- |
+| Events | `eventModel.findAllForUser` | Visible to the user |
+| [Meetings](./meetings.md) | `meetingModel.findForCalendar` | Not cancelled, and the user organized it or responded `going` |
+| [Interviews](./interviews.md) | `interviewModel.findForCalendar` | The user booked the slot |
 
-| Source | Function | On your calendar when |
-|---|---|---|
-| Events | `eventModel.findAllForUser` | its audience includes you |
-| [Meetings](./meetings.md) | `meetingModel.findForCalendar` | not cancelled, and you organised it or RSVP'd `going` |
-| [Interviews](./interviews.md) | `interviewModel.findForCalendar` | you booked the slot |
+Each source performs its own filtering. The controller merges the results without maintaining another visibility rule.
 
-Each `findForCalendar` already restricts to what belongs on that person's calendar, so **no further filtering happens in the controller** — and the portal's Calendar tab calls the same endpoints, so "what's on my calendar" has exactly one definition per source rather than one in SQL and a second in JSX.
+UIDs include a source prefix, such as `ktp-event-meeting-4@…`, so equal numeric IDs in different tables do not overwrite one another in calendar clients.
 
-Ids from all three tables start at 1, so each non-event source is prefixed into its own UID namespace (`ktp-event-meeting-4@…`, `ktp-event-interview-4@…`). The test asserts the merged UID set is collision-free; without it, meeting 4 and event 4 would be the same entry to a calendar client and one would silently overwrite the other.
-
-:::warning Group derivation
-The feed has no bearer token, so it rebuilds the caller's groups from the stored `member_group` and runs them through `expandImpliedGroups` — the same function `middleware/auth.js` applies to a normal request. That function is exported for this reason rather than duplicated.
-
-Without it a **chair** would silently miss every actives-targeted event in their calendar, because their `member_group` column says `chair` while the event targets `active`.
-:::
+Without a bearer token, the feed derives groups from stored `member_group` and applies `expandImpliedGroups`. This includes `active` for chairs and eboard, matching normal API authorization.
 
 ## The ICS serializer
 
-`services/icalendar.js` is a hand-rolled RFC 5545 writer. No dependency: this repo already can't run `npm audit fix` because of the React 19 peer conflict on the website side, so every package has a real ongoing cost, and the subset a read-only feed needs is small. It is **not** a general iCalendar library — no recurrence, no alarms, no timezones. Everything is emitted as UTC, which sidesteps `VTIMEZONE` entirely.
+`services/icalendar.js` implements the subset of RFC 5545 needed by the feed. It emits UTC timestamps without recurrence, alarms, or timezone definitions.
 
-Two functions do the work that actually goes wrong, and both fail *silently* — the file still imports, it just imports wrong. They're tested directly in `test/icalendar.test.js`.
+`test/icalendar.test.js` covers:
 
-**Escaping** (§3.3.11). Comma and semicolon are field separators, so an unescaped comma in "Info Session, Boyd 208" splits the field and the title arrives truncated. Backslash must be escaped **first**; escaping it afterwards would double-escape the backslashes the other rules just introduced.
-
-**Folding** (§3.1). Lines fold at 75 **octets**, not characters, with a CRLF and a single leading space continuing the line. The distinction matters because an emoji in an event title is four bytes in UTF-8: counting characters lets a line exceed the limit, and splitting on a character boundary computed from a byte budget can cut a multi-byte sequence in half and corrupt it. The implementation walks code points and only breaks between whole ones.
-
-Also worth knowing:
-
-- **CRLF everywhere.** A bare LF is the most common reason a hand-built `.ics` is rejected outright, and it's invisible in a diff.
-- **UIDs are stable**, derived from the event row id. A random UID per render would make every refresh duplicate the whole calendar instead of updating it.
-- **Unrepresentable events are dropped, not emitted broken.** An event with no start can't be expressed; an event whose end precedes its start makes some clients discard it silently, so `DTEND` is omitted instead.
-- **An empty calendar is still a valid document.** Clients treat a malformed feed as a subscription error and some stop retrying.
+- **Escaping:** escape backslashes before commas, semicolons, and newlines.
+- **Folding:** break lines at 75 octets with CRLF and a leading continuation space. Count UTF-8 bytes and do not split a code point.
+- **Line endings:** use CRLF throughout.
+- **Stable UIDs:** derive them from stored IDs so a refresh updates an existing event.
+- **Invalid dates:** omit events without a usable start and omit an end that precedes the start.
+- **Empty results:** return a valid empty calendar.
 
 ## Refresh timing, and what to tell members
 
-Calendar apps decide for themselves how often to re-poll. Apple is usually within the hour; **Google can take up to a day** and it is not configurable. `REFRESH-INTERVAL` and `X-PUBLISHED-TTL` are advisory and Google ignores them.
+Calendar clients control polling. A feed change may take hours to appear, and the refresh hints `REFRESH-INTERVAL` and `X-PUBLISHED-TTL` do not guarantee a deadline.
 
-So the feed is excellent for "my whole semester is in my calendar" and useless for "the meeting moved twenty minutes ago". Push notifications cover the urgent case. The Settings UI says this outright, because a member who doesn't know it will report the feature as broken.
+Use the portal or notifications for recent schedule changes. The Settings page should explain that a subscription is not an immediate-update channel.
 
 ## Proxying
 
-There is no generic `/api/*` rewrite in the website — every proxied path is an explicit route handler. `app/api/calendar/feed/[token]/route.js` is what makes the subscription URL work, and it is public, matching `app/api/homepage-photos`. It sets `dynamic = "force-dynamic"`: the feed changes whenever an event does, and framework-level caching would serve a stale calendar on top of the client's own refresh delay.
+`app/api/calendar/feed/[token]/route.js` proxies the public subscription URL to the API. It uses `dynamic = "force-dynamic"` so framework caching does not add another delay. The website uses explicit proxy handlers rather than a generic `/api/*` rewrite.

@@ -4,136 +4,89 @@ sidebar_position: 1
 
 # Member Management
 
-This guide covers how to add, remove, and manage members in the KTP system. All member accounts live in **Authentik** — the login system at [auth.ugaktp.com](https://auth.ugaktp.com). You'll need admin access to Authentik to perform these tasks.
-
-> **Who can do this:** Tech Dev VP or anyone with Authentik admin access.
-
----
+This guide covers account creation, group changes, removal, and password recovery. Authentik manages login accounts at [auth.ugaktp.com](https://auth.ugaktp.com). Direct administration requires an authorized Authentik account; eboard can also change member roles through the website.
 
 ## Adding a New Member
 
-Members are added through **invitation links**. Each invite is tied to a group (active, pledge, eboard, etc.) and automatically assigns the member when they register.
+Create an invitation for the intended role.
 
-### Step 1 — Create the Invitation
+### Step 1: Create the invitation {#step-1--create-the-invitation}
 
-1. Go to [auth.ugaktp.com](https://auth.ugaktp.com) and log in as admin
-2. Navigate to **Directory → Invitations**
-3. Click **Create**
-4. Fill in:
-   - **Name:** Something recognizable (e.g. "Spring 2026 Pledges" or "Jane Smith")
-   - **Flow:** `ktp-enrollment`
-   - **Custom attributes:**
-     ```json
-     {"group": "active"}
-     ```
-     Change `"active"` to the correct group for this member:
+1. Sign into Authentik's admin interface.
+2. Open the invitations list and create an invitation.
+3. Give it a recognizable name and select `ktp-enrollment`.
+4. Set its custom attributes, for example:
 
-     | Group | Who |
-     |-------|-----|
-     | `active` | Active members |
-     | `pledge` | Current pledge class |
-     | `eboard` | Executive board |
-     | `chair` | Committee chairs |
-     | `alumni` | Alumni |
+   ```json
+   {"group": "active"}
+   ```
 
-5. Click **Create**
-6. Copy the invite link and send it to the member
+5. Choose an expiry and enable Single use for an individual invitation.
+6. Create it and send the resulting link to the member.
 
-### Step 2 — Member Registers
+| Group | Intended members |
+| --- | --- |
+| `active` | Active members |
+| `pledge` | Current pledge class |
+| `eboard` | Executive board |
+| `chair` | Committee chairs |
+| `alumni` | Alumni |
 
-The member clicks the link and:
-1. Chooses a username and password
-2. Gets automatically added to their group
-3. Logs in at [ugaktp.com](https://ugaktp.com) and completes their profile (name, major, graduation date, etc.)
+See [Enrollment](../authentik/enrollment.md) for flow configuration and [Rush Signup](../website/rush-signup.md) for shared prospective-member invitations.
 
-After completing their profile, they'll be taken directly to their portal.
+### Step 2: Member registers {#step-2--member-registers}
 
----
+The member follows the invitation, chooses login credentials, and receives the invitation's group. They then sign into [ugaktp.com](https://ugaktp.com) and complete the required profile fields before entering their portal.
 
 ## Removing a Member
 
-1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
-2. Navigate to **Directory → Users**
-3. Find the member and click their name
-4. Click **Delete** and confirm
+1. In Authentik, open **Directory → Users**.
+2. Select the account.
+3. Choose **Delete** and confirm the intended account.
 
-That's it — a webhook automatically removes their row from the website's database within moments, no manual database step needed. (If a deleted member still shows up in the Directory or admin panel after a few minutes, the webhook may be broken — see [API: Webhooks](../api/endpoints.md#post-webhooksauthentik) for how to diagnose it, and contact Tech Dev.)
+The deletion notification calls the API to remove the matching application user. If the member remains listed, check webhook delivery and the stored Authentik integer ID. See [User-deletion webhook](../authentik/overview.md#webhook-user-deletion).
 
----
+Deleting an Authentik account differs from the member's self-service deletion, which anonymizes the application profile without removing the login account.
 
 ## Resetting a Member's Password
 
-1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
-2. Navigate to **Directory → Users**
-3. Find the member and click their name
-4. Click **Recovery Link**
-5. Copy the link and send it to the member — they'll use it to set a new password
-
----
+1. Open **Directory → Users** in Authentik.
+2. Select the user and choose **Recovery Link**.
+3. Send the link to that user so they can set a new password.
 
 ## Changing a Member's Group
 
-For example, moving a pledge to active after initiation, or a member to alumni after graduation.
+For eboard, use [Admin → Users](https://ugaktp.com/admin/users):
 
-**Preferred method — from the website (eboard only):**
+1. Find the member.
+2. Choose the new group in their row.
+3. Confirm that the update succeeds.
 
-1. Log into [ugaktp.com/admin/users](https://ugaktp.com/admin/users)
-2. Find the member and use the group dropdown on their row
-3. Pick the new group
+The API changes Authentik membership first, then updates the application database. Stored profile roles update immediately, but an existing session or access token may still contain older groups until refreshed or replaced.
 
-This takes effect **immediately** — no need for the member to log out and back in. It calls Authentik directly to make the actual change there (Authentik stays the source of truth), then updates the website's own records right away.
-
-**Fallback method — directly in Authentik** (if the website method is unavailable):
-
-1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
-2. Navigate to **Directory → Users**
-3. Find the member and click their name
-4. Go to the **Groups** tab
-5. Remove the old group and add the new one
-
-This way, the change only takes effect the next time the member logs in (the website re-syncs their group on every login) — not immediately.
-
----
+If the website operation is unavailable, an authorized Authentik administrator can edit **Directory → Users → Groups**, removing the old role and adding the intended one. The application synchronizes groups on login and when refreshed groups are processed. Signing out and back in obtains a new session for checking the result.
 
 ## Checking a Member's Status
 
-To see what group a member is in or whether they've completed their profile:
+Authentik's user Groups tab shows identity-provider membership. The website's admin user list shows application profile data. These can temporarily differ when a session still contains older claims.
 
-1. Go to [auth.ugaktp.com](https://auth.ugaktp.com)
-2. Navigate to **Directory → Users**
-3. Find the member — their groups are shown under the **Groups** tab
-
-For profile completion status, contact Tech Dev to check the database.
-
----
+When investigating a mismatch, record the intended role and compare Authentik membership, the application profile, and a newly established session.
 
 ## Bulk Onboarding (New Pledge Class)
 
-When onboarding an entire pledge class at once:
+1. Create individual invitations with `{"group": "pledge"}`, or a shared invitation if that is the intended access policy.
+2. Set Single use and expiry explicitly. Expiry and reuse are separate controls.
+3. Send the appropriate links.
+4. Confirm that members register and complete their profiles.
 
-1. Create one invitation per person (or reuse the same invitation link — it can be used multiple times by default unless you set an expiry)
-2. Set **Custom attributes** to `{"group": "pledge"}` for all of them
-3. Send each person their unique invite link, or share a single link if the invitation allows multiple uses
-4. Confirm each person completes their profile by logging into [ugaktp.com](https://ugaktp.com)
-
-After initiation, repeat the **Changing a Member's Group** steps above to move them from `pledge` → `active`.
-
----
+After initiation, change their role from `pledge` to `active`.
 
 ## Troubleshooting
 
-**Member says their invite link isn't working:**
-- Check if the invitation has expired — go to Directory → Invitations and verify it's still listed
-- Re-create the invitation and send a new link
-
-**Member is being sent to the wrong portal:**
-- Check their groups in Authentik (Directory → Users → Groups tab)
-- Remove the incorrect group and add the correct one
-- Have them log out and log back in
-
-**Member says they can't log in:**
-- Verify their username exists in Authentik (Directory → Users)
-- Use the Recovery Link option to send them a password reset
-
-**Member completed their profile but got sent back to complete-profile:**
-- Contact Tech Dev — this is a technical issue with the profile save
+| Symptom | Check |
+| --- | --- |
+| Invitation does not work | Expiry, Single use, prior redemption, and selected enrollment flow |
+| Wrong portal | Current Authentik groups, role priority, and a fresh website session |
+| Cannot sign in | Username and account status; use a recovery link when a password reset is needed |
+| Returns to profile completion | The profile-save response and required-field validation; ask Tech Dev to inspect the API and session state |
+| Deleted account remains listed | Webhook delivery, matching `authentik_pk`, and API logs |

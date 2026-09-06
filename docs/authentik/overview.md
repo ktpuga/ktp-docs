@@ -4,135 +4,172 @@ sidebar_position: 1
 
 # Overview
 
-**Authentik** is the identity provider (IdP) for KTP Georgia. It handles all login, SSO, and user onboarding. No passwords or credentials are stored in the KTP API or website — everything goes through Authentik.
+Authentik manages KTP Georgia's login accounts, passwords, and single sign-on. The website and API use its tokens to identify callers. Member profiles and committee membership are stored separately in the application database.
 
-**URL:** [https://auth.ugaktp.com](https://auth.ugaktp.com)  
-**Internal address:** `http://10.0.0.4:9000` (LXC 103)
-
----
+**Public address:** [auth.ugaktp.com](https://auth.ugaktp.com)
+**Internal address:** `http://10.0.0.4:9000` on LXC 103.
 
 ## What Authentik Does
 
 | Responsibility | Owner |
-|---------------|-------|
-| Usernames & passwords | Authentik |
-| Group membership | Authentik |
-| SSO / login session | Authentik |
-| Profile data (name, major, etc.) | PostgreSQL (via ktp-api) |
-| Portal access control | Website middleware (reads Authentik groups from JWT) |
+| --- | --- |
+| Login usernames and passwords | Authentik |
+| Role groups, such as `active` and `eboard` | Authentik |
+| Identity-provider login session | Authentik |
+| Website session and token refresh | NextAuth in the website |
+| Profile data and committee membership | PostgreSQL through ktp-api |
+| Portal routing | Website `proxy.ts` and `lib/home-portal.js` |
+| API permissions | API middleware, controllers, and models |
 
----
+The applications do not store members' login passwords. They do hold session tokens and deployment credentials needed to communicate with Authentik.
 
 ## OIDC Application
 
-The website and iOS app both authenticate via the **KTP OIDC application** in Authentik.
+The website and iOS app use separate Authentik providers. The API accepts tokens from either configured issuer.
 
-**Application slug:** `ktpapp`  
-**Issuer URL:** `https://auth.ugaktp.com/application/o/ktpapp/`  
-**JWKS URL (internal):** `http://10.0.0.4:9000/application/o/ktpapp/jwks/`
+| Client | Application slug | Issuer |
+| --- | --- | --- |
+| Website | `ktpapp` | `https://auth.ugaktp.com/application/o/ktpapp/` |
+| iOS | `ktpios` | `https://auth.ugaktp.com/application/o/ktpios/` |
+
+The API's corresponding internal JWKS URLs are:
+
+```text
+http://10.0.0.4:9000/application/o/ktpapp/jwks/
+http://10.0.0.4:9000/application/o/ktpios/jwks/
+```
+
+Configure the website provider with `AUTHENTIK_ISSUER` and `AUTHENTIK_JWKS_URL`, and the iOS provider with `AUTHENTIK_IOS_ISSUER` and `AUTHENTIK_IOS_JWKS_URL` in ktp-api. The issuer must match the token even when keys are fetched through an internal address.
 
 ### Redirect URIs (strict)
+
+The documented website callback URLs are:
 
 - `https://ugaktp.com/api/auth/callback/authentik`
 - `https://ktpgeorgia.com/api/auth/callback/authentik`
 
-> Add the app's development URL (e.g. `http://localhost:3000/api/auth/callback/authentik`) when running locally.
+Add the callback for a development origin when needed, such as `http://localhost:3000/api/auth/callback/authentik`. These are website callbacks; configure the iOS provider with the app's own redirect URI.
 
 ### PKCE and state checks
 
-Both are **disabled** on the website provider config — `checks: []` in `auth.ts`. PKCE cookies don't survive the Traefik reverse-proxy round-trip, causing `InvalidCheck: pkceCodeVerifier` errors in production; the state cookie was dropped for the same reason.
+The website's current `auth.ts` provider configuration sets `checks: []`, disabling PKCE and state checks. Earlier deployment notes attribute this to callback-cookie failures behind the reverse proxy.
+
+This describes the current configuration, not a requirement imposed by Traefik. Any change should be tested through the deployed login and callback flow, including cookie handling.
 
 ### `prompt=none`
 
-`/login` sends `prompt=none` on arrival to ask whether the browser already has a session, without Authentik rendering a login form. Anything that changes how this provider handles consent will change that answer — see [Sign-In Flow](../website/sign-in.md).
+The login flow uses `prompt=none` to check for an existing Authentik session without showing a login form. Consent and session configuration affect whether this succeeds. See [Sign-In Flow](../website/sign-in.md).
 
----
+The website requests `openid email profile groups offline_access`. The refresh path needs a refresh token; a website session being present does not by itself establish that its access token is still valid.
 
 ## Groups and Portal Routing
 
-Authentik groups map directly to portals on the website:
-
-| Authentik Group | Portal | Notes |
-|----------------|--------|-------|
-| `eboard` | `/admin` | Exec board members |
+| Authentik group | Portal | Notes |
+| --- | --- | --- |
+| `eboard` | `/admin` | Executive board |
 | `chair` | `/member` | Committee chairs |
 | `active` | `/member` | Active members |
+| `alumni` | `/alumni` | Alumni portal |
 | `pledge` | `/pledge` | Current pledge class |
-| `alumni` | `/member` | Alumni — share the member portal; `/alumni` was deleted 2026-08-05 |
-| `rush` | `/rushee` | Prospective members during rush — **not** `/rush`, which is the public page |
-| `admin` | — | System admins, no portal |
+| `rush` | `/rushee` | Prospective members; `/rush` is the public page |
+| `admin` | None | Infrastructure administration does not grant a chapter portal |
 
-**Priority order** (when a user is in multiple groups): `eboard > chair > active > alumni > pledge > rush`
+When groups overlap, priority is:
 
-The `member_group` stored in the database reflects the highest-priority group at login time.
+```text
+eboard > chair > active > alumni > pledge > rush
+```
 
-:::warning Two lists, and they must agree
-The order above lives in `ktp-api/constants/roleGroups.js`; the website's portal routing lives in `lib/home-portal.js`. Adding a group means editing both.
+The API defines role priority in `constants/roleGroups.js`. The website routes through `lib/home-portal.js`. Keep these aligned when changing roles. For example, a new pledge who still has `rush` should reach the pledge portal.
 
-`rush` is last on purpose. Authentik doesn't drop a group automatically, so someone accepted out of rush into a pledge class still carries `rush` — the higher-priority group has to win, or a new member keeps reading as a rushee after being accepted.
-:::
+User synchronization stores the highest-priority role in `users.member_group` on login and when refreshed groups are synchronized. Admin group changes also update the stored role. Existing tokens can retain old group claims until replaced.
 
----
+The website sends an account with no recognized group to `/`. The API has a separate fallback: it adds `rush` for request authorization and marks the result `group_defaulted` so synchronization does not overwrite a known stored role with that guess.
 
 ## Property Mappings
 
-A custom property mapping is required for the `authentik_pk` field to work:
+The deletion webhook matches users through Authentik's integer primary key. Add this property mapping to each provider that needs to supply it:
 
 | Name | Scope | Expression |
-|------|-------|-----------|
-| KTP User PK | openid | `return {"authentik_pk": request.user.pk}` |
+| --- | --- | --- |
+| KTP User PK | `openid` | `return {"authentik_pk": request.user.pk}` |
 
-This mapping must be added to the **KTP OIDC provider's selected Property Mappings**. Without it, `authentik_pk` stays `NULL` in the database and the webhook-based deletion cannot match rows.
-
----
+Select the mapping in the provider's Property Mappings. Without the claim, synchronization cannot populate `authentik_pk` from that token, and deletion cannot match a row whose key is still null.
 
 ## API Tokens / Service Accounts
 
-Used when ktp-api needs to call Authentik's own REST API directly, rather than just verifying tokens Authentik issued — the eboard "change member group" admin action, rush enrollment invitations, and self-service username changes (`services/authentikAdmin.js`, see [API: Eboard — changing a member's group](../api/overview.md#eboard-changing-a-members-group)).
+`services/authentikAdmin.js` calls Authentik's REST API for group changes, enrollment invitations, and username changes. This uses `AUTHENTIK_API_TOKEN`, separate from the bearer access tokens members send to ktp-api.
 
-Authentik tokens are always bound to a single Identity (a User) — there's no way to create a token "for a group" directly. The pattern used here:
+Use a dedicated service account, `ktp-api-service`, so access does not depend on a particular member retaining their role.
 
-1. **Directory → Users → Create Service Account** — creates a dedicated non-person user (`ktp-api-service`) and generates an API token in the same flow (shown once, copy it immediately). Using a dedicated service account rather than binding the token to a real person's account means it doesn't break if that person is demoted or leaves.
-2. **Directory → Groups → Create** a group (e.g. also named `ktp-api-service`) and add the service account user to it as a member.
-3. **Directory → Roles → Create** a Role (e.g. `ktp-api-group-manager`), then assign it to that group.
-4. Grant the Role permissions:
-   - **Object-level**, on each of the five role groups individually (`eboard`/`chair`/`active`/`alumni`/`pledge` — go to each group's own Permissions tab → "Assign object permissions to role"): `Add user to group`, `Remove user from group`, `Can view Group`. Scoping this per-object (not globally) means the token can only ever touch these five specific groups, not every group in the instance.
-   - **Global**, on the Role's own "Assigned global permissions" tab (not "Initial Permissions" — that's a different feature, for auto-granting permissions on objects the role's members *create*, not applicable here): `Can view User`, and `Can change User` if self-service username changes are enabled (see below). Both have to be global since ktp-api needs to reach any member, including ones who join later — a per-object grant wouldn't cover future users.
-5. Generate the token: **Directory → Tokens and App passwords → Create**, Identity = the service account, **Intent = API Token** (this field matters — other intents get rejected as `Token invalid/expired` even though the token exists and looks otherwise correct).
-6. Copy the token into `AUTHENTIK_API_TOKEN` in ktp-api's `.env`. `docker compose restart` does **not** re-read `.env` — use `docker compose up -d` (recreate) after changing it.
+The documented setup is:
 
-:::warning `Can change User` is required for self-service username changes, and is broad
-`PUT /users/me/username` writes the new name to Authentik before mirroring it into Postgres, via `PATCH /core/users/{pk}/`. Without `Can change User` on the role, Authentik answers **403** and every rename fails.
+1. In **Directory → Users**, create the service account. Save any generated token when shown.
+2. Create a group for the service account and add it as a member.
+3. Create a role, such as `ktp-api-group-manager`, and assign it to that group.
+4. On each managed role group (`eboard`, `chair`, `active`, `alumni`, and `pledge`), assign object permissions to that role: **Add user to group**, **Remove user from group**, and **Can view Group**.
+5. In the role's **Assigned global permissions**, grant **Can view User**. Username changes also require **Can change User**. Initial Permissions apply to newly created objects and are not the same setting.
+6. If creating a token separately, use **Directory → Tokens and App passwords**, select the service account as Identity, and choose **API Token** as Intent.
+7. Store it as `AUTHENTIK_API_TOKEN` in the API deployment environment. Recreate the container with `docker compose up -d` to apply changed environment variables; `docker compose restart` does not reload them.
 
-This is worth granting deliberately rather than by reflex: it lets ktp-api modify **any** user in the instance, not just usernames and not just the caller. The containment is in ktp-api's code, not in the grant — `authentikAdmin.updateUsername` sends only `{ username }`, and the controller only ever resolves the pk of the authenticated caller. If you'd rather not hold that permission, leave it ungranted and the feature simply reports that renames are unavailable.
+These group permissions cover the named groups only. Invitation management has its own permission requirements; see [Enrollment](./enrollment.md).
 
-**The first attempt at this feature was reverted because of exactly this.** The code mapped every Authentik failure onto "that username is taken", so a missing permission looked like a name collision and the real cause never surfaced. It now distinguishes them: `409` means taken, `502` means the API could not complete the write — check `docker logs` for the `[updateUsername] authentik 403` line.
-:::
+The username helper sends `PATCH /core/users/{pk}/` with only `{ username }`. The self-service controller selects the authenticated user; the eboard endpoint can select another member. The **Can change User** grant is broader than these operations, so the API must enforce the target and accepted fields.
 
----
+A username collision returns `409`. An Authentik write failure returns `502`; inspect the API's username-update logs for the upstream status. A `403` from Authentik can indicate missing service-account permissions.
+
+See [Changing a member's group](../api/overview.md#eboard-changing-a-members-group) for the API workflow.
 
 ## Webhook (User Deletion)
 
-A notification transport calls the API when a user is deleted in Authentik. **Working and confirmed in production** — deleting a user in Authentik correctly removes their row from `users` with no manual step.
+An Authentik notification transport calls:
 
-**Transport URL (internal):** `http://10.0.0.53:4000/webhooks/authentik`  
-**Trigger:** Event Matcher Policy — Action: `Model Deleted`, Model: `authentik_core.user`, App field: **blank** (see below for why)
+```text
+POST http://10.0.0.53:4000/webhooks/authentik
+X-Authentik-Token: <WEBHOOK_SECRET>
+```
 
-This took a while to get right — two independent, non-obvious Authentik-side misconfigurations, neither on the ktp-api side:
+The current API handler reads this nested payload:
 
-1. **The Notification Rule needs a Group or "Send notification to event user" set**, or the whole Rule silently no-ops regardless of how correctly the Policy/Transport are configured. There's no error shown anywhere for this — it just never fires.
-2. **The Event Matcher Policy's "App" field compares against `event.app`** (the Event object's own originating-subsystem field), **not** `event.context.model.app` (the app of the model that actually changed) — confirmed by reading Authentik's source (`authentik/policies/event_matcher/models.py`). A real user-deletion event never satisfies `event.app == "authentik_core"`, so a Policy with App set here always silently fails to match even when Action and Model are both correct. Fix: leave App blank.
+```json
+{
+  "event": {
+    "action": "model_deleted",
+    "context": {
+      "model": {
+        "model_name": "user",
+        "pk": 42
+      }
+    }
+  }
+}
+```
 
-**If this breaks again:** check `docker logs worker` on the Authentik host (the *worker* container specifically, not `server` — confirm the exact container name with `docker ps`, it's changed before). Structured JSON logs include a `policy_execution` entry per policy per event with a per-criterion pass/fail, which is the fastest way to see exactly which criterion is failing.
+When the token matches and the event identifies a deleted user, the API deletes rows matching `users.authentik_pk`. This differs from self-service account deletion, which anonymizes the application row without deleting the Authentik account.
 
----
+The documented notification configuration uses:
+
+- Event Matcher Action: **Model Deleted**.
+- Model: **User (authentik_core)**.
+- App: leave blank.
+- Notification Rule: set a Group or enable **Send notification to event user**.
+
+The Event Matcher App setting checks `event.app`, not `event.context.model.app`. A rule without a recipient setting does not send the notification in the documented deployment.
+
+To investigate a missing deletion, check both ends:
+
+1. On the Authentik host, use `docker ps` to find the worker container, then inspect `docker logs <worker-container>`. Its `policy_execution` records show matching results.
+2. In the API logs, find `[webhook] received`. Check whether the request arrived, whether the secret matched, and whether the nested action and model were recognized.
+3. If the event was processed but the row remains, check the stored `authentik_pk` against the event's `pk`.
+
+Do not include the webhook secret in diagnostic notes.
 
 ## Password Reset for Existing Users
 
-Forced password reset was removed from the authentication flow. To reset a specific user's password:
+The documented login flow does not force existing users through a password reset. For an individual reset:
 
-1. Authentik admin panel → **Directory → Users → select user**
-2. Click **Recovery Link**
-3. Email the link to the user
+1. Open **Directory → Users** in Authentik and select the user.
+2. Choose **Recovery Link**.
+3. Send the link to that user.
 
-New users set their password through the enrollment invitation flow — they never need a separate reset step.
+New users set a password during enrollment and do not need a separate recovery step.

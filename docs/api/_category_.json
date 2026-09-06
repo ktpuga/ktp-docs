@@ -3,6 +3,6 @@
   "position": 3,
   "link": {
     "type": "generated-index",
-    "description": "Documentation for the KTP REST API (ktp-api) — authentication, endpoints, database schema, and deployment."
+    "description": "KTP API authentication, endpoints, database schema, and deployment."
   }
 }

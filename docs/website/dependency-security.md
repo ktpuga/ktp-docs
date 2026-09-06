@@ -4,71 +4,44 @@ sidebar_position: 15
 
 # Dependency security
 
-How to read the website's vulnerability alerts, and why the raw count on GitHub has never been the number that matters.
+Review vulnerability reports alongside the dependency path, affected code, and deployment build. An alert count alone does not establish exposure.
 
-## The number that matters
+## Reading audit results {#the-number-that-matters}
 
-Run this, not `npm audit`:
+Run both:
 
 ```bash
 npm audit --omit=dev
+npm audit
 ```
 
-As of the August 2026 cleanup this reports **0 vulnerabilities**. Plain `npm audit` reports 19, and GitHub's Dependabot dashboard reports more still. All three are correct; they just count different things.
+The first excludes development dependencies; the second includes them. Neither directly inventories the final standalone Docker image. Build tools can also matter during installation and CI.
 
-| Command | Counts | Aug 2026 |
-|---|---|---|
-| `npm audit --omit=dev` | What actually ships | **0** |
-| `npm audit` | Ships **plus** build tooling | 19 |
-| Dependabot dashboard | Every lockfile in the repo, separately | was 77 |
+The August 2026 cleanup recorded zero production-classified findings and 19 in the full audit. Those are historical results, not the current security status. Rerun the commands when assessing a change.
 
-The 19 are all `sanity@4.6.0` and its dependency chain. Sanity Studio is a local developer tool — it is not deployed, and `npm run studio:deploy` has never been run. None of that code executes in production. **This is a deliberate, reviewed decision, not a backlog item.** See [Why the remaining 19 stay](#why-the-remaining-19-stay).
+Dependabot can include findings from multiple supported manifests and lockfiles, so its total may differ from a local npm audit.
 
 ## The August 2026 cleanup
 
-The dashboard showed **77 open alerts**, including 2 critical. Three things were inflating it.
-
 ### 1. `react-multi-carousel` vendored the entire npm CLI
 
-The package declares this in its own manifest:
+The recorded package manifest included:
 
 ```json
 "dependencies": { "core-js": "^3.32.2", "install": "^0.13.0", "npm": "^10.1.0" }
 ```
 
-That is a packaging mistake in the upstream package — someone ran `npm i install npm` and committed the result. It pulled **16 MB of `node_modules/npm/`** into the *production* dependency tree, and that subtree was the source of nearly every runtime-scoped alert:
+The unused package brought an npm dependency subtree into the installation. Its only remaining import was in an archived rush-page file. Removing it removed 199 packages in that cleanup.
 
-```
-tar 7.5.11        npm/tar             <- the only CRITICAL
-sigstore 3.1.0    npm/sigstore
-@sigstore/core    npm/@sigstore/core
-ip-address 10.1.0 npm/ip-address
-glob 10.5.0       npm/glob
-brace-expansion   npm/brace-expansion
-picomatch 4.0.3   npm/picomatch
-```
-
-**The package was not used anywhere.** Its only import lived in `app/rush/spring-rush-2026-page.archive.bak`, an orphaned archive file nothing referenced. The live carousels in `components/GalleryCollection.jsx` are hand-rolled with `next/link`.
-
-Removing it dropped **199 packages** and cleared the critical plus most of the highs, with zero code changes.
-
-:::tip Check this before adding any dependency
-`npm ls npm` should return nothing. If a package vendors the npm CLI, it drags in dozens of advisories that have nothing to do with your app. `sanity@4.22` does this too — see below.
-:::
+Use `npm ls npm` to check whether a proposed dependency brings its own npm CLI. Investigate unexpected subtrees before accepting them.
 
 ### 2. Three lockfiles, all tracked
 
-The repo tracked `package-lock.json`, `yarn.lock` **and** `bun.lock`. Dependabot scans each one independently, so every advisory was counted two or three times — 39 alerts from `package-lock.json` and 38 from `yarn.lock` describing the same vulnerabilities.
+The repository previously tracked npm, Yarn, and Bun lockfiles that could diverge. It now uses `package-lock.json`. Keep dependency updates in the chosen package manager's manifest and lockfile.
 
-They also drifted. PR #42 added `auto-skeleton-react` to `package.json` and `package-lock.json` only; `yarn.lock` stayed short an entry until someone noticed by hand. Nothing in CI caught it.
+### 3. The `nanoid` override {#3-nanoid-was-the-one-real-production-issue}
 
-**`yarn.lock` and `bun.lock` were deleted. `package-lock.json` is the only lockfile.**
-
-### 3. `nanoid` was the one real production issue
-
-After the first two fixes, `npm audit --omit=dev` reported exactly one advisory: `nanoid@3.3.16`, high, [GHSA-2v37-7h3g-55p8](https://github.com/advisories/GHSA-2v37-7h3g-55p8). It arrives through `postcss`, which is bundled inside both `next` and `vite`, and through `@sanity/client`.
-
-Fixed with a **version-scoped** override:
+The cleanup added this override for the 3.x dependency line:
 
 ```json
 "overrides": {
@@ -76,19 +49,11 @@ Fixed with a **version-scoped** override:
 }
 ```
 
-The `@^3.0.0` scoping is essential. Three copies of `nanoid` are installed, and the 5.x ones are already patched:
+The recorded advisory was [GHSA-2v37-7h3g-55p8](https://github.com/advisories/GHSA-2v37-7h3g-55p8). The scoped key leaves 5.x consumers on their own major version. An unscoped override could force incompatible versions into those consumers.
 
-```
-DEV   5.1.15   @sanity/mutate/nanoid           already above the 5.1.6 fix line
-PROD  5.1.16   @sanity/visual-editing/nanoid   already above the 5.1.6 fix line
-PROD  3.3.18   nanoid                          <- the one that needed pinning
-```
+## Overrides and the Docker build {#why-overrides-and-not-npm-audit-fix}
 
-A bare `"nanoid": "^3.3.18"` would force those 5.x copies down to 3.x. They are ESM-only with a different API, so Sanity would break.
-
-## Why `overrides` and not `npm audit fix`
-
-**Production never reads a lockfile.** The `Dockerfile` deps stage is:
+The current dependency stage copies only the manifest:
 
 ```dockerfile
 FROM base AS deps
@@ -96,41 +61,23 @@ COPY package.json ./
 RUN npm install --legacy-peer-deps
 ```
 
-Only `package.json` is copied. Production re-resolves every dependency from its semver range on each build, which means:
+It does not install from `package-lock.json`. Docker builds therefore resolve package ranges again, and a lockfile-only fix does not pin the production build.
 
-- **Production builds are not reproducible.**
-- **Editing a lockfile does nothing for production.** `npm audit fix` changes `package-lock.json`, which moves the GitHub dashboard and changes nothing that deploys.
-- **Pinning a version means pinning it in `package.json`.**
+An override in `package.json` applies during that fresh resolution. Check both the manifest and the build process when deciding how a dependency fix reaches deployment.
 
-`overrides` is a `package.json` field applied at resolution time, so it works on a fresh install with no lockfile present. **It is the only lockfile-independent way to pin a transitive dependency in this repo.**
+The project uses `--legacy-peer-deps` because some packages' declared React peer ranges lag the installed React version. A normal install or audit-fix operation can fail with `ERESOLVE`. Do not change icon-library versions solely to clear that error without checking imports and the build.
 
-:::warning `npm audit fix` cannot run here at all
-`lucide-react@0.344.0` declares peer `react@^16 || ^17 || ^18` against this project's React 19, so any plain `npm` command fails with `ERESOLVE`. Always use `npm install --legacy-peer-deps`. Do **not** "fix" this by bumping `lucide-react` — icon names change between its versions, which is the recurring `CircleCheck` breakage.
-:::
+## Reviewing development dependencies {#why-the-remaining-19-stay}
 
-## Why the remaining 19 stay
+The historical remaining findings came through Sanity development tooling. A Sanity upgrade was attempted and reverted after its dependency tree added further findings.
 
-They are all reachable only through `sanity@4.6.0`, a `devDependency`: `@sanity/cli`, `@sanity/runtime-cli`, `@architect/*`, `adm-zip`, `decompress`, `tar`, `brace-expansion`, `glob`, `js-yaml`, `undici`, `dompurify`, `esbuild`, `uuid`.
-
-`npm audit` proposes `sanity@4.22.1` as the fix. **That upgrade was attempted and reverted.** It pulls in its own vendored npm CLI subtree and *added* roughly 39 dev-only high advisories — the total went from 40 to 65, worse than the baseline. Everything it cleared was itself dev-only or low severity. It was pure dashboard noise for no production benefit.
-
-If someone proposes bumping Sanity again, **measure the resulting advisory count before accepting it.**
+That result is context for a future upgrade, not a permanent exemption. Compare affected versions, advisory details, dependency paths, local/CI exposure, and build behavior. Record why a finding is fixed, deferred, or not applicable.
 
 ## Repository alert settings
 
-| Repo | Dependabot alerts | Notes |
-|---|---|---|
-| `ktpuga/uga-ktp-website` | on | 77 open before the cleanup |
-| `ktpuga/ktp-api` | on | 0 alerts; only 8 dependencies and no devDependencies |
-| `ktpuga/ktp-docs` | unknown | API returns 403 without admin, so the state cannot be read |
-| `yashverms32/ktp-docs` (fork) | **off** | |
-| `andrew-babatunde2004/KTP_LIFE_UGA` | **off** | iOS/Swift; no npm manifest to scan |
+Check current repository settings instead of relying on earlier alert totals. A denied API request does not prove that alerts are disabled; inspect its message and the caller's permissions.
 
-:::note A 403 is not an answer
-`GET /repos/{owner}/{repo}/dependabot/alerts` returns 403 both when alerts are genuinely disabled *and* when you simply lack admin on the repo — but with **different messages**. `"Dependabot alerts are disabled for this repository"` is a real state; `"You are not authorized to perform this operation"` means you cannot see the state at all. Read the message, not the status code. Reading alerts requires **admin or security-manager**, not push.
-:::
-
-Reading alerts programmatically requires the `security_events` scope:
+For a classic-token GitHub CLI session, the documented alert-reading workflow is:
 
 ```bash
 gh auth refresh -h github.com -s security_events
@@ -138,13 +85,14 @@ gh api repos/ktpuga/uga-ktp-website/dependabot/alerts --paginate \
   --jq '.[] | [.security_advisory.severity, .dependency.package.name, .dependency.scope] | @tsv'
 ```
 
-The `dependency-graph/sbom` endpoint is unreliable and times out on both repos. Do not treat a 404 or 500 from it as evidence that a repo is unscanned; check `repos/OWNER/REPO/vulnerability-alerts` instead, which returns **204** when alerts are enabled.
+An authorized request to `repos/OWNER/REPO/vulnerability-alerts` returns `204` when alerts are enabled. A failure from the SBOM endpoint alone does not establish whether alert scanning is enabled.
 
 ## Checklist for the next dependency change
 
-1. `npm install --legacy-peer-deps` — never plain `npm install`.
-2. `npm ls npm` — must return nothing.
-3. `npm audit --omit=dev` — this is the number that matters; it should stay at 0.
-4. `npm run build` — must exit 0.
-5. Only `package-lock.json` should appear in the diff. If `yarn.lock` or `bun.lock` came back, delete them.
-6. To pin a transitive dependency, use `overrides` in `package.json`. Scope it with `name@range` if multiple major versions are installed.
+1. Install with the project's required peer-dependency option.
+2. Inspect the dependency tree, including unexpected npm CLI dependencies.
+3. Run the production-filtered and full audits, and assess the findings.
+4. Build the website and check affected functionality.
+5. Review `package.json` and `package-lock.json` together. Avoid introducing another package manager's lockfile.
+6. Scope overrides to the affected version range when different major versions coexist.
+7. Record completed command results and remaining findings; do not reuse an earlier audit count as a current result.

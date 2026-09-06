@@ -4,310 +4,173 @@ sidebar_position: 1
 
 # Overview
 
-The **member portal** (`uga-ktp-website`, [ugaktp.com](https://ugaktp.com)) is a Next.js 16 app (App Router, Turbopack, Tailwind, shadcn/ui) that serves both the public marketing site and the logged-in member portals. It talks to `ktp-api` for all data — see [API Overview](../api/overview.md) for the backend side of everything described here.
-
----
+`uga-ktp-website` serves [ugaktp.com](https://ugaktp.com), including the public site and authenticated portals. It uses Next.js 16 with the App Router, Turbopack, Tailwind, and shadcn/ui. Portal data comes from the separate `ktp-api` deployment. See [API Overview](../api/overview.md).
 
 ## Portals
 
-Every member is routed to one portal based on their Authentik group (see [Auth & Onboarding](../authentik/overview.md)):
+The website chooses a portal from the user's Authentik groups, in this order:
 
 | Group | Portal |
-|-------|--------|
+|---|---|
 | `eboard` | `/admin` |
 | `chair`, `active` | `/member` |
-| `alumni` | `/alumni` — restored 2026-09-02, see below |
+| `alumni` | `/alumni` |
 | `pledge` | `/pledge` |
-| `rush` | `/rushee` — see [Rush Portal](./rush-portal.md) |
+| `rush` | `/rushee` |
 
-Order matters, and `alumni` is checked **after** `chair`/`active`: Authentik does not remove the old group when someone graduates, so an alumnus still marked active holds both and the more capable portal has to win.
+A user with both active and alumni groups lands in the member portal. `proxy.ts` redirects users who visit a different portal and handles profile-completion routing. API authorization remains separate from these website redirects. See [Auth & Onboarding](../authentik/overview.md).
 
-`proxy.ts` enforces these boundaries — visiting a portal you don't belong to redirects you to your actual one. It also gates `/complete-profile` for anyone who hasn't finished onboarding yet. (This file was `middleware.ts` until the [Next.js 16 migration](./nextjs-16-migration.md) renamed it; the logic is unchanged.)
+All five portals use `PortalShell` for navigation, theme controls, the profile card, and sign-out.
+
+The alumni portal has a smaller navigation menu: dashboard, announcements, directory, contact sheet, files, messages, and settings. It was restored in September 2026; the former redirects to `/member` have been removed.
 
 ### Portal preview: eboard viewing a portal as a member
 
-**Admin → Settings → View a portal as a member.** Eboard picks a group and lands in that portal seeing exactly what it sees — the same announcements, events, polls and documents, filtered to that audience.
+From **Admin → Settings → View a portal as a member**, eboard can preview a group's QA account.
 
-It works by **becoming** the group's QA account, not by simulating one. Those accounts already existed: migration `1784600000000` created one per `member_group` for the team to verify permissions with, and they are already hidden from the directory and the member-count stat. The website sends `X-View-As: <authentik_id>` and `ktp-api` swaps `req.user` for that account.
+The website sends `X-View-As: <authentik_id>`. After validating the real caller's token, the API applies these checks:
 
-:::tip Why impersonation rather than a "preview mode"
-Roughly thirty call sites filter on `req.user.groups`, and more read `req.user.authentik_id` for committee membership, RSVP state and audience overlap. A parallel "what would a pledge see" implementation would have to mirror all of it — and it would drift, which is exactly how the duplicated portals grew their `GROUP_ORDER` and `Promise.all` bugs.
-
-Becoming the account means every existing rule applies without being restated, so **the preview cannot disagree with the real thing**.
-:::
-
-:::danger `/events` forgot to honour it, and the calendar leaked
-`applyViewAs` originally lived only inside `requireAuth`, under a comment saying every router mounts that "so a new route cannot forget to honour preview mode." **`GET /events` and `GET /events/:id` use `optionalAuth`** — they are the only two routes in the API that do — so they never ran it.
-
-The consequence was specific and bad: `eventsController.getEvents` branches on `groups.includes("eboard")` to skip audience filtering entirely. During a preview `req.user` was still the real eboard caller, so **the calendar listed every event in the chapter, including ones deliberately hidden from rushees**, inside a portal whose announcements, polls and documents were all correctly filtered.
-
-Not an escalation — eboard can read all of it anyway. But a preview exists to show what somebody else sees, and it was showing something nobody else sees. `applyViewAs` now runs in both middlewares, and `test/portalPreview.test.js` asserts it for each.
-
-An **anonymous** caller who sends `X-View-As` on an `optionalAuth` route stays anonymous rather than getting a 403 — that route's contract is that it never rejects, and ignoring the header is also the least-privileged reading. An authenticated non-eboard caller still gets the 403.
-:::
-
-Four gates, all server-side in `middleware/auth.js`, and the UI is not one of them:
-
-| # | Gate |
+| Check | Requirement |
 |---|---|
-| 1 | A verified token — this runs after `verifyToken` |
-| 2 | The **real** caller must be `eboard` |
-| 3 | The target must have `is_test_account = true`, **checked in SQL** |
-| 4 | The request must be a `GET` or `HEAD` |
+| Caller | Eboard |
+| Target | A database row with `is_test_account = true` |
+| Method | `GET` or `HEAD` |
 
-:::danger Read-only is not about escalation
-Previewing only ever **narrows** access — eboard viewing as a pledge can reach strictly less than eboard. The reason writes are refused is **attribution**: without it, eboard could post an announcement, send a message or RSVP while wearing the QA account, and the audit trail would name the wrong actor. A preview that can write is not a preview.
+The API then replaces `req.user` with the QA account and retains the real caller in `req.realUser`. Existing audience and ownership queries run against that account. This shows the QA account's data and memberships, which may differ from an individual member's.
 
-`req.realUser` keeps the genuine eboard identity for anything that needs to know who is actually there.
-:::
+`applyViewAs` runs in both `requireAuth` and `optionalAuth`, including the public event routes. An anonymous request on an optional-auth route stays anonymous. An authenticated non-eboard caller cannot use the preview header.
 
-Gate 3 is the one worth reading twice: the allowlist is a SQL predicate, not an id comparison in JavaScript, so **there is no request shape that aims the preview at a real member**. A real member's id and a nonexistent id return the *same* 404, so this cannot be used to probe whether a given `authentik_id` exists. `test/portalPreview.test.js` asserts all four gates.
+The target predicate is checked in SQL. A real-member target and a nonexistent target both return 404.
 
-Leaving preview is client-side — the cookie is deleted and that is all. That is the advantage over signing in as the QA account directly: leaving cannot strand anyone, and closing the browser leaves preview on its own.
+The `ktp_view_as` cookie identifies the target; it does not authorize access. The API checks the real caller on each request, and `proxy.ts` only honors the cookie for eboard sessions. Exiting preview clears the preview cookies. The root-layout banner identifies the active preview on every page.
 
-:::warning The cookie grants nothing, and the banner is load-bearing
-`ktp_view_as` names a target; it is not a credential. `ktp-api` re-checks the caller's own token on every request, so a forged or stale cookie yields a 403 or 404 rather than access. `proxy.ts` honours it only when the session is already `eboard`.
+#### Rendering the previewed account {#the-browser-has-to-render-as-the-previewed-account-too}
 
-The banner is mounted at the **root layout**, not inside the portal layouts, so it follows you onto every page until you exit. This codebase has twice shipped bugs where two sessions coexisted in one browser and quietly disagreed, and both were invisible while happening. A preview that looks identical to the real portal is the same failure waiting: glance at an empty announcements list, conclude the chapter has none, and you were looking at a pledge's view without knowing.
-:::
+`usePortalViewer()` in `lib/use-portal-viewer.js` returns `{ groups, authentik_id, isPreview }`. Components use it for group-based controls and ownership checks instead of reading the real session directly.
 
-#### The browser has to render as the previewed account too
+The `ktp_view_as_group` cookie supplies the preview group and uses the API's chair-implies-active expansion. These client values affect rendering only. The sidebar uses the fetched QA profile and avoids falling back to the real user's session while previewing.
 
-Swapping `req.user` fixes what the API *returns*. It does nothing about what the client decides to *draw*, and every portal control was gated on the next-auth session — which still said eboard. So a preview showed correctly filtered member data underneath **eboard's toolbar**: Create Event, the edit and delete pencils, Create Committee, the document-management tiers, bulk invite, the directory's leadership actions.
+The hook reads cookies in an effect, so the first paint can briefly show a control for the real user's groups. API permissions still apply.
 
-`lib/use-portal-viewer.js` is the seam. `usePortalViewer()` returns `{ groups, authentik_id, isPreview }` — the signed-in values normally, and the previewed account's while a preview is running. Every component that gates on a group or on "is this mine" reads from it instead of `useSession`.
+#### Preview interactions {#everything-is-clickable-only-writes-are-inert}
 
-The previewed group rides in a third cookie (`ktp_view_as_group`, raw slug) so the hook needs no round trip, and is expanded through the same chair-implies-active rule the API applies. Like the other two cookies it **grants nothing** — it decides what to render, never what is allowed, and ktp-api re-checks the real caller's token on every request.
+`PreviewGuard` allows navigation, tabs, and modals. It blocks write controls marked `data-preview-block` and displays “Preview only. Nothing was saved.”
 
-The sidebar profile card is part of this: it used to fall back to `session.user` for the name, initials and group, so a preview showed the *previewing eboard member's* identity at the bottom of somebody else's portal. It now takes the identity from the fetched profile (which already arrives through `X-View-As`) and refuses the session fallback entirely while previewing.
+The guard handles clicks, changes, and form submissions. `data-preview-allow` exempts the Exit form. Message composers use `data-preview-block-enter` to block plain Enter-to-send while allowing Shift+Enter and IME composition.
 
-:::warning One frame of the real session, accepted deliberately
-The cookie is read in an effect, so the first paint uses the signed-in groups and an admin control can flicker once before disappearing. Reading it during render would mismatch the server-rendered HTML and break hydration; reading it in the layout would opt the public marketing pages out of static rendering — the regression `PreviewBanner` already documents. A one-frame flash of a button that cannot write is the cheapest of the three.
-:::
+Every authenticated fetch in `lib/portal-api.js` must include `previewHeader()`, including direct fetches for multipart uploads, messages, profiles, and interview notes. Otherwise, the API sees the real account without knowing that preview is active and may accept a write as that account.
 
-#### Everything is clickable; only writes are inert
+The API rejects non-GET/HEAD requests that carry the preview header. A missing UI marker can therefore produce an error, but a missing request header bypasses that preview-specific check.
 
-`PreviewGuard`, mounted in the root layout, used to swallow **every** button click. That did stop writes, but it also stopped tabs, modals, expanders and the calendar's month arrows — controls that issue no request at all and only move client state. Half of what a preview exists to show lives behind one of those, so the feature read as broken.
-
-The rule is now inverted: **everything runs by default, and only controls that actually write are swallowed.** Those carry `data-preview-block`. Two additions matter:
-
-- **Form submits are swallowed whether marked or not** — a form is unambiguously a write. `[data-preview-allow]` is the exception, and it is what keeps the banner's own Exit form working.
-- **`change` is intercepted as well as `click`.** A `<select>` never fires a click on its option, so the attendance status dropdown reached the API *even under the old block-everything rule*.
-
-A blocked interaction raises a toast — *"Preview only. Nothing was saved."* — rather than silently doing nothing. A control that does nothing reads as a bug, which is precisely the report that produced this rewrite.
-
-:::tip Why a missed marker is safe
-Gate 4 has not moved. `ktp-api` still refuses any non-`GET`/`HEAD` request in preview, so an unmarked control **cannot write**. It gets a 403, which crosses the Server Action boundary and surfaces as React's #441 digest — ugly, and worth fixing when spotted, but a **visible** failure.
-
-That asymmetry is the entire reason the rule is "block the marked ones" and not "allow the marked ones": a mistake in this direction is annoying, and a mistake in the other direction is invisible.
-
-The markers were placed from the **call graph**, not by eye: every exported `lib/portal-api.js` function that can reach a write (following delegation through `sendEventPayload`, `sendMultipart`, `adminMutate` and `interviewDelete`), then every `onClick`/`onChange`/`onSubmit` whose expression reaches one — including handlers passed down as props into child components.
-:::
-
-:::danger A message escaped a preview, because only `apiRequest` sent the header
-`previewHeader()` lived inside `apiRequest`. But roughly **thirty** calls in `lib/portal-api.js` are direct `fetch`es that deliberately bypass that helper — every multipart upload, the message sends, the profile and username writes, the interview notes. `apiRequest` sets `Content-Type: application/json` whenever a body is present, which strips a multipart boundary, so those calls *must* go around it.
-
-They went around `X-View-As` at the same time. The API therefore had no idea a preview was happening on any of them, `applyViewAs` never ran, and the write was accepted **as the real eboard member**. A message sent while previewing was delivered by an account that had not written it: it never appeared in the previewed portal, the recipient got a notification for it, and the sender could not find it to delete.
-
-That is exactly the attribution failure the read-only rule exists to prevent — the rule simply never got a chance to run. All 27 authenticated call sites now spread `...(await previewHeader())`.
-
-**If you add a `fetch` to `portal-api.js`, spread the preview header into it.** There is no lint rule for this one, and the failure is silent.
-
-*(Recovering a message that escaped this way: `deleteMessage` permits the sender **or** eboard, so exiting preview and deleting it from your own Messages works regardless of which account it was attributed to.)*
-:::
-
-:::warning Enter-to-send needed its own marker
-The composer sends on Enter, so marking the send button was not enough — and this is how the message above actually escaped. It cannot be a plain `data-preview-block`: swallowing every keystroke on the textarea means you cannot type in it at all, and being unable to read a conversation properly defeats the preview.
-
-`data-preview-block-enter` swallows **plain Enter only**. Shift+Enter still makes a newline, and IME composition is left alone — pressing Enter to accept a candidate in a Japanese or Chinese input method is not a send, and treating it as one would make the box unusable in those languages.
-:::
-
-:::warning View receipts are dropped, not refused
-`markConversationRead`, `markGroupChatRead`, `markCommitteeSeen` and the notification `seen` writes fire from an **effect**, not a click, so no click guard can swallow them — and they would 403 mid-render. `apiRequest` drops those four paths outright while a preview target is set.
-
-That is the correct behaviour rather than a workaround: eboard reading a QA account's inbox must not mark that account's messages as read, or the preview quietly changes the thing it is supposed to be observing.
-:::
-
-**All four portals** share the `PortalShell` component (grouped sidebar nav, dark mode toggle, profile card, sign-out). The earlier inconsistency where `/pledge` had its own hand-rolled layout is resolved.
-
-:::warning `/alumni` came BACK on 2026-09-02. The note below is history.
-It is deliberately **not** the clone described below: no Committees, Meetings, Polls, Tickets or Calendar, because those are things a graduated member does not take part in. Six entries across two sections plus Account, in amber.
-
-The deletion still earned its keep in one specific way. The `/alumni → /member` redirects were written `permanent: false` **precisely so this day would be cheap** — a 308 is cached by browsers indefinitely and would have stranded anyone who had followed one. Restoring the portal was therefore a deletion of two lines rather than a support thread. ⚠ And those redirects **had** to go: a redirect shadows a real route, so leaving them would have sent every `/alumni` request to `/member` and none of the new pages would ever have rendered.
-
-If it ever drifts back into mirroring `/member` entry for entry, delete it again and route alumni to `/member` — that trade was correct the first time.
-:::
-
-:::note Why it was deleted in 2026-08 (historical)
-It was a copy of the member portal in amber. Every route wrapped the **same** shared component with a different `theme` prop and slightly different copy; the only structural difference was that it had no Attendance tab, which is chair-only anyway.
-
-It bought nothing, because `ktp-api` never distinguished the two: `alumni` has always been in `SHARED_ALBUM_GROUPS`, so an alumnus could already reach everything `/member` renders. What the duplicate did buy was a second place for every portal bug to hide — and it did, repeatedly (see the `GROUP_ORDER` and `Promise.all` traps elsewhere in these docs).
-
-`/alumni` and `/alumni/:path*` now redirect to the `/member` equivalent, for bookmarks and links in past emails. The redirects are **temporary (307), not permanent** — a 308 is cached by browsers indefinitely, so if an alumni-only portal is ever wanted back, everyone who followed one would keep landing on `/member` with no way to clear it.
-
-Alumni are still labelled **Alumni** in the sidebar: `PortalShell`'s `GROUP_PRIORITY` resolves the badge from the user's group, not from which portal they're in.
-:::
+Automatic conversation-read, group-read, committee-seen, and notification-seen writes are dropped by `apiRequest` while previewing. Reading a preview should not change its unread state.
 
 ### Accent colors
 
-The portals are one visual family rather than colour-coded ones: `/member`, `/pledge` and `/rushee` all render the same blue, and `/admin` is the only portal whose colour is a **user preference** — eboard picks red or blue from Settings, stored per-browser under the `ktp-admin-accent` key. The `amber` palette that `/alumni` used still exists in `PALETTES` and is simply unused.
+Member, pledge, and rush use blue. Alumni uses amber. Admin supports a red/blue preference stored per browser as `ktp-admin-accent`.
 
-Because Admin's colour is no longer fixed, it can't be a hardcoded constant. `PortalAccentProvider` (in `components/portal/PortalAccentContext.jsx`) publishes the resolved palette from `PortalShell`, and any component at any depth reads it with `useAccentPalette()`. Admin-only components — Analytics, User Management, Announcements, Rush Signup, Rush Announcements, Homepage Photos, iOS Slideshow, Moderation — all use the hook, so an Admin page follows the toggle rather than staying maroon.
+`PortalAccentProvider` publishes the palette through `useAccentPalette()`. Shared palette definitions live in `components/portal/PortalAccentContext.jsx`. Each layout supplies its own navigation and `homeHref` separately from its accent.
 
-Two things deliberately stay hardcoded and should not be converted: **member-group identity colours** (the maroon chip that means "eboard" in the directory, charts and group chats) and **destructive/danger styling**. Those carry meaning independent of which portal you're in.
-
-:::note
-`accent` used to double as the key into `PortalShell`'s `NAV_GROUPING` map, so it selected the sidebar contents *and* the home href as well as the colour — repointing it emptied the sidebar. That coupling is gone: each layout now owns its own grouped `nav` and passes `homeHref` explicitly, and `accent` means only "which palette". Palettes live in one place, `PALETTES` in `components/portal/PortalAccentContext.jsx`.
-:::
-
----
+Member-group badges and destructive controls keep their semantic colors regardless of the portal palette.
 
 ## Shared features across portals
 
-The portals share a core feature set wired to the same backend, with permissions differing by group. One deliberate exception: **pledges have no Committees tab** (the route doesn't exist, it isn't merely hidden).
+Features share components and API routes, but navigation and permissions differ by portal:
 
-- **Dashboard** — upcoming events, recent announcements, recent photos, quick links. The landing page of all four portals, `/admin` included since 2026-08-12
-- **Calendar** — chapter events, including committee meetings, targeted to whoever's allowed to see them. An event can ask for an **RSVP**, answered from the Upcoming events list beside the calendar; the sidebar badges until you answer ([RSVP](../api/endpoints.md#rsvp))
-- **Committees** — browse committees and member counts; **request** to join a committee (eboard or that committee's chair approves) and leave any you are on; eboard creates committees and promotes/demotes chairs; a chair gets two scheduling buttons for their own committee — **New Meeting** (RSVP, private to invitees) and **Schedule Event** (calendar entry with optional QR attendance), see [Meetings](./meetings.md#meeting-or-event-the-committee-page-offers-both)
+| Feature | Behavior |
+|---|---|
+| Dashboard | Upcoming content, recent activity, and links appropriate to the portal |
+| Calendar | Audience-filtered events, RSVP, and permitted meeting/interview entries |
+| Committees | Membership requests, approvals, member management, and scheduling |
+| Polls | Single- or multiple-choice voting, audience targeting, optional closing time |
+| Files & Photos | Albums, documents, and external links |
+| Messages | Direct messages and group chats |
+| Directory | Profile cards grouped by member role |
+| Meetings | Invitations with accept/decline responses |
+| Calendar subscription | A personal feed for an external calendar |
+| Settings | Profile editing, account controls, and applicable preferences |
 
-:::warning Joining a committee is not cosmetic, which is why it needs approval
-A committee membership row grants the committee **group chat with its history**, read access to **everything restricted to that committee** (albums, folders, documents, events, meetings, announcements, polls), and eligibility to **run interviews**, which exposes rushee names.
+Rush has its own dashboard and restricted feature set. Pledges have no Committees route. Alumni navigation omits committees, meetings, polls, tickets, and calendar.
 
-Until 2026-08-11 anyone could grant themselves all of that by clicking Join, and nobody could take it back. Now the button says **Request to Join**, the request grants nothing on its own, and eboard or that committee's chair approves it. Chairs and eboard can also remove a member, which was previously impossible.
+Admin also provides analytics, user management, rush management, oversight, and homepage media. Events are created and edited from the calendar. Homepage Media separates website content from the iOS slideshow.
 
-A pending request is stored separately from membership on purpose — putting it in the members table with a status flag would have granted the access at the moment of asking.
-:::
-- **Polls** — vote on chapter/committee polls; eboard creates polls (single- or multi-choice, optional scheduled auto-close) and sees who voted for what — see [API: Polls](../api/endpoints.md#polls)
-- **Files & Photos** — shared photo albums + the eboard-managed document library, now including external links alongside real files ([Photos & Documents](./photos-and-documents.md))
-- **Messages** — direct messages and group chats, including auto-managed committee chats ([Messaging](./messaging.md))
-- **Directory** — browse members, view a profile, start a conversation, request a meeting. One tab per member group (E-Board, Chairs, Members, Pledges, Alumni, and Rushees during rush). Available in `/member`, `/pledge` and, since 2026-08-11, `/admin` ([Profiles & Directory](./profiles-and-directory.md))
-- **Meetings** — request time with a member or a group; they accept or decline, and it lands on both calendars ([Meetings](./meetings.md))
-- **Calendar subscription** — put every event you can see into Apple/Google/Outlook, kept up to date automatically ([Calendar Subscription](./calendar-subscription.md))
-- **Settings** — edit your own profile (including profile picture, UGA and personal email, and an About Me), subscribe your calendar, review your blocked members (only shown if you have any), delete your account ([Safety & Moderation](#safety--moderation))
-
-`/admin` additionally gets **Analytics** (the second tab on `/admin` itself — chapter metrics), **User Management** (`/admin/users` — real member data, plus eboard can change a member's group and set exec board titles from here), **Oversight** (`/admin/oversight` — the moderation queue and the activity log, one tab each, see below), and **Homepage Media** (`/admin/homepage-media` — the public chapter gallery on a Website tab, the in-app slideshow on an iOS App tab; still two separate systems, now one page). Announcement and poll creation, including audience targeting, lives at `/admin/announcements` and `/admin/polls`. **Events are created and edited on the Calendar** — an **Add event** button in its header for eboard, and an edit pencil beside the delete button on each event card, gated by the same rule as delete (eboard, or the event's own creator). They lived on an Events tab of `/admin/announcements` until 2026-08-31; the calendar is where somebody already is when they notice a time is wrong.
-
-Analytics was `/admin` itself until 2026-08-12 — eboard was the one group whose portal did not open on the Dashboard. It now does, on the same `PortalDashboard` the other three portals use, in whichever accent the red/blue toggle is set to. Analytics kept every feature and simply moved one route down.
-
----
+See [Messaging](./messaging.md), [Meetings](./meetings.md), [Profiles & Directory](./profiles-and-directory.md), [Photos & Documents](./photos-and-documents.md), and [Notifications](./notifications.md) for details.
 
 ## Attendance
 
-Events can opt into QR-code attendance tracking. The flow:
+Events can enable QR-code attendance:
 
-1. Whoever creates the event enables attendance on it.
-2. Eboard or the event's creator opens the **Attendance** tab and displays the generated QR code.
-3. Members scan it while signed in, landing on `/checkin/[eventId]/[token]`, which records them as present.
-4. The organizer can view who checked in and manually correct anyone's status to present, excused, or absent.
+1. The organizer enables attendance on the event.
+2. Eboard or the event's creator opens the attendance roster and displays the QR code.
+3. A member scans it and opens `/checkin/[eventId]/[token]`.
+4. The website calls a Server Action, which sends the user's bearer token and attendance code to the API.
+5. The page displays success or the returned error. Organizers can also mark people present, excused, or absent manually.
 
-The check-in window opens **30 minutes before the event starts** and closes **30 minutes after it ends** — scanning outside it is rejected, as is a stale or wrong code. It opens early because people queue before an event begins.
+The event check-in window opens 30 minutes before the start and closes 30 minutes after the end. The HMAC code rotates every 10 seconds; the API accepts the current and previous periods. A particular code therefore has about 10 to 20 seconds of validity. A recent photo can still work within that interval.
 
-The QR itself carries a code that **rotates every 10 seconds**, so photographing the board is worthless; the server accepts the current period and the one before it, giving a scan 10–20 seconds to land.
+Authentication can fail before the attendance controller runs. An authenticated website session does not by itself prove that the API access token is valid. See [Sign-In Flow](./sign-in.md) for token refresh and session handling.
 
 ### Scanning while signed out
 
-Attendance is recorded against an account, so a scan by someone not signed in cannot count. That page now sends them to `/login?next=/checkin/…` and **brings them back to the check-in page afterwards** — previously the Sign in link dropped the destination and left them on their portal home, with nothing to suggest the check-in had not happened.
+The check-in page sends an unauthenticated visitor to `/login?next=/checkin/…` and returns them after sign-in. The original attendance code may have expired during login, requiring another scan of the live QR code.
 
-:::note They still scan once more, and that is not a bug
-An Authentik round-trip takes longer than the code lives, so by the time they return the code in the URL has rotated. The returning page says so and points at the live code; the second scan is instant because they are signed in by then.
-
-One scan end-to-end would mean the server capturing the scan *before* login — validating the code while fresh and holding it in a short-lived cookie to be claimed afterwards. That is a real bearer credential with a lifetime, and it was judged not worth introducing for a case that only affects people whose session has lapsed.
-:::
-
-:::danger `next` is an allowlist, never a sanitiser
-`lib/next-path.js` matches the one URL shape this feature needs (`/checkin/<id>/<code>`) and returns null for everything else, falling back to normal portal routing.
-
-A post-login redirect target is a textbook open-redirect hole: `/login?next=https://evil.example/login` would produce a convincing phishing page that the chapter's own domain sent you to, moments after a genuine sign-in. Denylisting `//`, `\\` and `://` is the usual approach and it leaks, because browsers disagree about what counts as a scheme. **Widening this means adding a pattern with a reason, not loosening the regex.**
-:::
+`lib/next-path.js` accepts only the supported `/checkin/<id>/<code>` return-path shape. Unsupported values fall back to normal portal routing. Add explicit patterns if another return destination is needed.
 
 ### Filtering the roster, and the CSV
 
-The roster is **grouped by status** — present, excused, not marked, absent — alphabetical within each group, ordered in SQL so every client agrees. Rows therefore move as people scan themselves in, because the pane re-polls every few seconds.
+The API orders the roster by status: present, excused, not marked, then absent, with names alphabetical within each group. The website polls for updates.
 
-Above the counts is a row of **group pills**, multi-select, showing only the groups actually on that roster: an event targeted at pledges never offers an Alumni pill, since filtering to zero reads as "no alumni came" rather than "no alumni were invited". Filtering runs in the browser over the roster already fetched, so it costs no request.
+Group filters operate on the fetched roster. Counts and CSV exports reflect the selected groups, and the UI also shows the full roster size. Export filenames include the filter. The filter clears when switching events.
 
-**Export CSV** downloads the roster as `Name, Group, Status, Checked In, Recorded`. `Recorded` is `Self (QR)`, `Manual`, or blank for a row nobody has touched — three distinguishable values, because a "Marked By" column would be blank both for a manual mark (the API returns `marked_by` as a bare id, with no name to print) and for an unmarked row, which is the one distinction the column exists to make.
+CSV columns are `Name, Group, Status, Checked In, Recorded`. Recorded is Self (QR), Manual, or blank for an untouched row.
 
-Names come from the **frozen** `display_name`, so a member whose account was later deleted still exports under the name that was on the roster rather than a blank cell.
+Names and groups come from the roster's saved `display_name` and `member_group` values. Later profile edits, role changes, or account deletion do not rewrite those historical values.
 
-:::warning A filtered roster's counts describe the filter, not the event
-Turn a pill on and every number in the counts row — including **"N expected"** — describes only the selected groups. The export does the same, and names the groups in its filename.
+The Attendance tab appears for chairs in `/member` and eboard in `/admin`. Other users check in through the QR page. API checks determine which events an organizer can manage.
 
-That is deliberate ("how many pledges missed this" is the question worth asking), and it is also the one way this feature does damage: `12 expected` copied into meeting minutes as the event's turnout. So whenever a filter is on, the pane states the filter and the full roster size directly beneath the counts, and the export filename carries the groups. **Do not remove either.** They are what make the narrowed numbers safe to read.
-:::
-
-The filter is **cleared when you switch events**. Carried across, it would silently hide people on the next roster, and a pill for a group nobody on it belongs to is not rendered at all — so nothing on screen would reveal that a filter was still on.
-
-`member_group` on each row is the value **frozen when the roster was materialised**, not a live lookup. Filtering a spring event to Pledges therefore shows who was a pledge *that night*, not who is still one now the class has been initiated.
-
-Regular members have no attendance UI beyond the confirmation screen after a scan. The Attendance tab appears only for **chairs** (in `/member`) and **eboard** (in `/admin`). Alumni and pledges don't have it at all.
-
-See [API: Attendance](../api/endpoints.md#attendance) for the endpoints.
-
----
+See [API: Attendance](../api/endpoints.md#attendance).
 
 ## Public roster (`/members-list`)
 
-A public "meet the chapter" page — no login required — showing eboard, committee chairs, active members, and alumni with their photos and titles.
+The public chapter page reads [`GET /roster`](../api/endpoints.md#roster-public), separate from the authenticated directory.
 
-It reads the separate public [`GET /roster`](../api/endpoints.md#roster-public) endpoint rather than the authenticated directory, and deliberately exposes far less: no email, phone, major, DOB, or pledge class.
+Eligible eboard, chairs, active members, and alumni appear with public profile fields. The response excludes contact details such as email and phone, as well as major, date of birth, and pledge class.
 
-Who does **not** appear:
-
-- **Pledges** — initiated members only
-- **Incomplete profiles**
-- **Test accounts**
-- **Anyone without a profile picture** — deliberate, to encourage members to upload one
-
-That last rule surprises people. If a member asks why they aren't on the public roster, a missing profile picture is the first thing to check.
-
----
+Pledges, rush accounts, incomplete profiles, test accounts, profiles without a photo, and users who opted out are excluded. For a missing member, check both eligibility and public-roster preference. See [Profiles & Directory](./profiles-and-directory.md).
 
 ## Safety & Moderation
 
-Added to support real content moderation and the iOS app's App Store review requirements (an app with messaging and user-uploaded photos needs reporting, blocking, and a way to delete your own account). See [API: Reports & Moderation](../api/endpoints.md#reports--moderation) and [API: Users — blocking](../api/endpoints.md#post-usersidblock) for the backend routes.
+- **Reports:** Profiles, messages, and photos can be reported to the eboard moderation queue.
+- **Blocking:** Users can block or unblock other users. Blocking prevents direct-message exchange and hides blocked users' messages from the blocker's views. It does not remove someone from a group chat.
+- **Blocked list:** Settings shows the list when the user has blocked someone.
+- **Moderation:** Eboard reviews open and historical reports in `/admin/oversight`, with resolution notes.
+- **Rate limits:** Direct and group message sends are limited to 20 per minute per user on their respective routes.
+- **Account deletion:** The self-service action anonymizes the API profile and signs the user out. Shared history remains associated with a deleted user. Authentik account administration is a separate operation.
 
-- **Report** — a Report button on member profiles, direct/group messages, and photos submits a reason + optional explanation to eboard's queue. The reporter isn't shown to anyone but eboard.
-- **Block** — self-service, and available anywhere Report is: **a small block control sits directly beside the report control** on a member's directory profile, on every direct/group message, and on every photo tile and lightbox. A DM's header keeps a full labelled Block button, since it has no report control to pair with. Stops that person from messaging you (either direction) and hides their messages from your own DM and group chat views — they stay a group chat member, just invisible to you specifically. Reviewing your blocked list lives in Settings, but **only appears once you've actually blocked someone**: a "View blocked members" button with a count, which opens a popup listing each blocked member with an Unblock button. Members who've never blocked anyone see nothing about blocking in Settings at all.
-- **Moderation queue** (the Reports tab of `/admin/oversight`, eboard only) — Open/History tabs, resolve or dismiss each report with an optional note for the record.
-- **Content filtering & rate limiting** — message sends are checked against a basic profanity filter and capped at 20/minute/user server-side; a rejected or throttled send surfaces as a real error message, not a silent failure.
-- **Account deletion** (Settings → Danger Zone) — self-service, type "delete" to confirm. **Anonymizes rather than hard-deletes**: your personal info is cleared and you're signed out immediately, but your existing messages/photos/committee history stay in place for other members (shown as coming from a deleted user) rather than disappearing out from under a shared conversation or album. Doesn't touch your actual Authentik/chapter membership — that's still an eboard-owned, separate action.
-- **Privacy Policy & Community Guidelines** (`/privacy`, `/community-guidelines`) — public pages, linked from the site footer and Settings. **Content is a draft pending real leadership/legal review** — written from the App Store submission checklist's own requirements, not yet signed off as final chapter policy.
+`/privacy` and `/community-guidelines` are public and linked from the footer and Settings. Their documented review status is draft pending chapter review.
 
----
+See [Reports & Moderation](../api/endpoints.md#reports--moderation) and [Messaging](./messaging.md). The current API has no profanity filter.
 
 ## Committees
 
-DB-only membership, not a new Authentik group per committee — see [API: Committees](../api/overview.md#committees--committee_members-tables) for why. One shared page (not a new portal), available in `/member` and `/admin`. **Pledges don't get it** — the `/pledge/committees` route doesn't exist.
+Committee membership lives in Postgres, separate from Authentik role groups.
 
-- **Anyone**: browse committees and member counts, join or leave any committee themselves.
-- **Eboard**: create/delete committees, promote or demote a member to **chair**.
-- **A committee's chair** (and eboard, for any committee): two separate buttons — **New Meeting** creates a private RSVP request for the committee; **Schedule Event** creates a calendar entry for everyone in it, with QR attendance on by default. [Which one to use](./meetings.md#meeting-or-event-the-committee-page-offers-both).
+Eligible members can browse committees, request membership, and leave. A pending request grants no membership access. Eboard or the committee's chair approves requests and can remove members. Eboard creates or deletes committees and assigns chairs.
 
-Every committee automatically gets its own linked Group Chat (see [Messaging](./messaging.md#group-chats)) — joining/leaving the committee joins/leaves the chat too.
+Membership can grant access to committee-restricted content and group chats whose audience references the committee. It does not create a separate linked chat automatically.
 
----
+A committee chair can schedule a private meeting request or a committee event with attendance. See [Meeting or event](./meetings.md#meeting-or-event-the-committee-page-offers-both).
+
+Pledge-committee designation also controls rush-data access. Interview management and note permissions have additional rules; see [Interviews](./interviews.md).
 
 ## Dark mode
 
-Available across the app via `PortalThemeProvider`/`ThemeToggle` — most portal components have `dark:` Tailwind variants.
-
----
+`PortalThemeProvider` and `ThemeToggle` control the portal theme. Components use Tailwind `dark:` variants.
 
 ## Loading skeletons
 
-Added 2026-08-12 (PR #42). The dashboard shows shaped placeholders while its four API calls are in flight instead of the "Loading..." text it used to.
+`PortalDashboard.jsx` uses `auto-skeleton-react` to derive placeholders from the dashboard markup while data loads. `data-no-skeleton` excludes decorative elements.
 
-There are **two mechanisms**, and they are not interchangeable:
-
-- **`auto-skeleton-react`** — a dependency, used in exactly one file, `components/portal/PortalDashboard.jsx`. Wrap a block in `<AutoSkeleton loading={loading}>` and it derives the placeholder from the real markup, so the skeleton cannot drift from the layout it stands in for. Mark a child `data-no-skeleton` to leave it out (used for the hover-only accent bar on the stat cards, which has nothing to stand in for).
-- **Hand-rolled `animate-pulse` spans** — used for the sidebar's user block in `PortalShell.jsx` and for the name in the dashboard hero, where the placeholder is a single line of text and pulling in the wrapper would be more machinery than the job needs.
-
-:::note PR #42's `PortalShell.jsx` diff looks enormous and is almost entirely reformatting
-586 changed lines, of which the only behavioural change is two `animate-pulse` spans. The rest is one long `RevampedNavItem` signature reflowed across multiple lines. Don't go looking for a rewrite that isn't there.
-:::
-
----
+The sidebar user block and dashboard name use smaller `animate-pulse` placeholders.
 
 ## Local development
 
@@ -316,22 +179,33 @@ npm install --legacy-peer-deps
 npm run dev
 ```
 
-`--legacy-peer-deps` is required, not optional. A bare `npm install` fails outright with `ERESOLVE` — `lucide-react@0.344.0` declares a peer of React 16/17/18 and this app is on React 19. See [Next.js 16 migration](./nextjs-16-migration.md#if-you-need-to-roll-back) for the full story, including why production is unaffected.
+The install flag accommodates the manifest's React peer-dependency mismatch. Production uses the same flag. See [Next.js 16 migration](./nextjs-16-migration.md).
 
-Key environment variables (see `.env.example` for the full, annotated list):
+Use `.env.example` for the complete variable list:
 
-- `AUTH_URL=http://localhost:3000` — must also be a registered redirect URI on the `ktpapp` Authentik provider, or SSO login fails locally
-- `API_URL` — for local website dev, point at the **public** `https://api2.ugaktp.com` rather than the internal IP, unless you're also running ktp-api's own code locally
-- `AUTH_SECRET` — generate your own (`openssl rand -base64 32`); never reuse the production value
-- `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` — same values work locally and in production (same Authentik provider)
+| Variable | Purpose |
+|---|---|
+| `AUTH_URL` | Local website origin, usually `http://localhost:3000` |
+| `API_URL` | API deployment to use; choose the local/test API for development that writes data |
+| `AUTH_SECRET` | A local secret, generated with `openssl rand -base64 32` |
+| `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | Credentials for the configured OIDC provider |
 
----
+The provider must allow the local callback URI. A remote public API is reachable without LAN access, but requests still affect that deployment's data.
 
 ## Common gotcha: stale `.next` build cache
 
-After heavy git operations (branch switches, merges, stashes), you may see errors like `Cannot find module './431.js'` or `invalid code lengths set` even though "Compiled successfully" printed first. This is stale/inconsistent `.next` output, not a real code problem:
+After branch switches or merges, missing generated modules or decompression errors can come from inconsistent `.next` output. Stop the development server, remove its generated build directory from the website repo, and restart:
 
 ```bash
-rm -rf .next      # PowerShell: Remove-Item -Recurse -Force .next
+rm -rf .next
 npm run dev
 ```
+
+PowerShell equivalent:
+
+```powershell
+Remove-Item -Recurse -Force .next
+npm run dev
+```
+
+If the error remains after rebuilding, investigate it as a code or dependency issue.

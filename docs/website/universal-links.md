@@ -4,84 +4,80 @@ sidebar_position: 5
 
 # Universal Links (attendance check-in)
 
-How an attendance QR code opens the **KTP Life** iOS app instead of Safari.
-
-This spans both repos: the website serves the association file, the app claims the domain. Neither half works alone.
+Universal Links let an attendance QR open the KTP Life iOS app. The website serves an association file, and the app declares the domains and handles the check-in path.
 
 ## The problem it solves
 
-Attendance QR codes encode a plain link — `https://ugaktp.com/checkin/{eventId}/{token}` — built in `AttendancePage.jsx` from `window.location.origin`. Scanned with the iOS Camera, that opens Safari, where the member almost certainly isn't signed into the portal. They land on "Sign in to check in" and have to run a whole Authentik login in mobile Safari, in a session entirely separate from the app's.
+`AttendancePage.jsx` builds links from the current origin:
 
-The app already holds a valid Authentik token. Universal Links let the scan reach it directly.
+```text
+https://ugaktp.com/checkin/{eventId}/{token}
+```
+
+A browser and the iOS app have separate sessions. Opening the app can avoid a browser login when the app is already authenticated. Check-in still depends on a valid access token and an unexpired attendance code.
 
 ## Website side
 
-Served at `https://ugaktp.com/.well-known/apple-app-site-association` by a **Next.js route handler**, not a static file in `public/`:
+The association file is served by:
 
-```
+```text
 uga-ktp-website/app/.well-known/apple-app-site-association/route.js
 ```
 
+Its association includes:
+
 ```json
-{"applinks":{"details":[{"appIDs":["ZAL9S5GDHG.SB.KTPLIFE"],
-"components":[{"/":"/checkin/*"}]}]}}
+{
+  "applinks": {
+    "details": [{
+      "appIDs": ["ZAL9S5GDHG.SB.KTPLIFE"],
+      "components": [{"/": "/checkin/*"}]
+    }]
+  }
+}
 ```
 
-The App ID is `<TeamID>.<BundleID>`, both from `KTPLIFE.xcodeproj/project.pbxproj` (`DEVELOPMENT_TEAM` and `PRODUCT_BUNDLE_IDENTIFIER`).
+The App ID combines the Xcode project's `DEVELOPMENT_TEAM` and `PRODUCT_BUNDLE_IDENTIFIER`. The route explicitly returns JSON and limits association to `/checkin/*`, leaving other website paths in the browser.
 
-:::warning A route handler, not a file in `public/`
-Apple requires this be served as `Content-Type: application/json`, and the filename has no extension. A static handler guesses `application/octet-stream` and **iOS silently ignores it** — no error, the link just keeps opening Safari. The route handler sets the header explicitly.
-
-Next.js does serve dot-prefixed route directories; `app/.well-known/...` appears in the build output as a normal prerendered route.
-:::
-
-:::danger Scope it to `/checkin/*` only
-Claiming `/*` would make **every** ugaktp.com link try to open the app — every portal page anyone shares in a group chat. Keep the `components` path narrow.
-:::
-
-Apple also rejects the file on **any redirect**. If Traefik ever starts bouncing apex→www, Universal Links break with no visible symptom. Verify with:
+Check the public response:
 
 ```bash
 curl -sSI https://ugaktp.com/.well-known/apple-app-site-association
 ```
 
-Expect `200`, `content-type: application/json`, and no `location:` header.
+Expect `200`, `Content-Type: application/json`, and no redirect. Check both supported hosts when changing proxy or domain configuration.
 
 ## App side
 
-**Associated Domains** capability on the target, listing both hosts:
+The app's Associated Domains entitlement lists:
 
-```
+```text
 applinks:ugaktp.com
 applinks:ktpgeorgia.com
 ```
 
-Both are required because the QR is built from `window.location.origin` — whichever domain the eboard member was browsing ends up in the code. The site answers on both.
-
-Requires the capability enabled on the App ID in the Apple Developer portal (Identifiers → `SB.KTPLIFE` → Associated Domains), and a real device — **Universal Links do not work in the Simulator.**
+Both hosts matter because the officer's current website origin determines the QR host. The app identifier and provisioning must support Associated Domains. Verify the complete Camera-to-app flow on a physical device.
 
 ## Handling in the app
 
-`KTPServices/CheckInService.swift` holds both halves:
+`KTPServices/CheckInService.swift` contains the link parser and API request:
 
-- `CheckInLink` parses `https://<allowed host>/checkin/{eventId}/{token}`, rejecting anything else
-- `CheckInService.checkIn` posts to `POST /checkin/:eventId/:token` with the app's bearer token
+- `CheckInLink` validates the host and `/checkin/{eventId}/{token}` path.
+- `CheckInService.checkIn` sends the app's bearer token to `POST /checkin/:eventId/:token`.
 
-`ContentView` feeds it from two entry points, deliberately sharing one parser so they can't disagree about what a valid link is:
+`ContentView` uses the same parser for both entry points:
 
-| Entry point | Needs Associated Domains? |
-|---|---|
-| In-app QR scanner (Home → QR button) | **No** |
-| iOS Camera → Universal Link | Yes |
+| Entry point | Needs domain association? |
+| --- | --- |
+| In-app QR scanner | No |
+| iOS Camera opening a Universal Link | Yes |
 
-:::tip The in-app scanner is the reliable path
-It needs no Apple configuration, no association file and no deploy — it never leaves the app. Universal Links are a convenience entry point on top. If check-in is broken, test the in-app scanner first to separate an app problem from a Universal Links problem.
-:::
+If a scan does not open the app, test the in-app scanner separately. A working in-app scan narrows the problem to link association or dispatch rather than proving that every check-in path is healthy.
 
-No backend change was needed for any of this: `POST /checkin/:eventId/:token` already sits behind plain `requireAuth` and identifies the member from the token, so the app calls it exactly as the website does. See [Attendance](../api/endpoints.md).
+The API uses the bearer token to identify the member. See [Attendance](../api/endpoints.md#attendance).
 
 ## When it doesn't work
 
-Apple's CDN caches the association file aggressively, so a correction can take a while to reach devices. On a debug build, append `?mode=developer` to the entitlement (`applinks:ugaktp.com?mode=developer`) to bypass the CDN and have the device fetch directly.
+Association files are cached, so a website change may not immediately reach a device. Check the served file, app ID, entitlements, supported host, and path before changing authentication or attendance code.
 
-Reinstalling the app also forces a re-fetch — iOS only reads the association file at install time.
+Development builds can use the Associated Domains developer mode, such as `applinks:ugaktp.com?mode=developer`, with the required device setup. Reinstalling can help test a newly configured association, but do not treat it as a guarantee that every cached copy has refreshed.

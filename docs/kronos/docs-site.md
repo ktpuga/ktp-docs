@@ -4,60 +4,45 @@ sidebar_position: 2
 
 # Docs Site (This Site)
 
-This site is the official documentation hub for **Kappa Theta Pi – Phi Chapter (UGA)**.
-
-We use **Docusaurus** to power the docs, which gives us:
-
-- Markdown-first content
-- Versioned documentation
-- Fast static builds
-- Clean routing and search
-- Easy contributions via Git
+The chapter documentation uses Docusaurus, with Markdown and MDX source files. Node.js builds the static site, which runs in Docker on Kronos.
 
 ## Tech Stack
 
-- **Framework:** Docusaurus
-- **Language:** Markdown (with MDX support)
-- **Build:** Node.js
-- **Deployment:** Docker on a Proxmox-hosted server
+| Component | Tool |
+|---|---|
+| Site framework | Docusaurus |
+| Content | Markdown and MDX |
+| Build | Node.js |
+| Hosting | Docker on Proxmox |
 
-## Deployment 🥀
+## Deployment {#deployment-}
 
-This site is **automatically rebuilt and redeployed every night at midnight** via a scheduled
-[cron job](https://en.wikipedia.org/wiki/Cron) on the Proxmox host.
+The documented deployment schedule is a midnight cron job on the Proxmox host. It pulls the repository, builds the site in Docker, and recreates the running container.
 
-The job performs the following steps:
-
-1. Pulls the latest changes from the Git repository
-2. Rebuilds the Docusaurus static site inside Docker
-3. Recreates the running container with the updated build
-
-As a result, any merged changes to the repo will be reflected on **docs.ugaktp.com** without manual intervention.
-
-(Previously, this process was fully manual — involving SSH, `git pull`, and a lot of `docker compose` commands. We do better now.)
+Merged changes appear after a successful scheduled build. If the site is stale, check the cron job and build output.
 
 ## Access Control (SSO)
 
-This site is gated behind **Authentik SSO** — anyone visiting `docs.ugaktp.com` must log in with a KTP account before seeing any page. This was added once the docs started including infrastructure detail (internal IPs, deployment procedures, database commands) that shouldn't be public.
+Authentik protects `docs.ugaktp.com` through Traefik forward authentication. Docusaurus serves static files; Traefik asks Authentik to authorize requests before forwarding them to the docs container.
 
-It works via **Authentik's forward-auth pattern**, since Docusaurus has no auth of its own — Traefik intercepts every request to `docs.ugaktp.com` and asks Authentik's embedded outpost "is this person logged in?" before ever proxying to the actual docs container.
+The Authentik application policy admits active, chair, alumni, eboard, and pledge groups. Rush-only accounts are excluded.
 
 ### Authentik side
 
-1. **Applications → Providers → Create → Proxy Provider**, named `docs-proxy`
-   - Mode: **Forward auth (single application)**
-   - External host: `https://docs.ugaktp.com`
-   - Authorization flow: same one `ktpapp` uses
-2. **Applications → Applications → Create**, named `KTP Docs`, provider `docs-proxy`
-   - Access restricted to actual member groups (active/chair/alumni/eboard/pledge) via a policy binding, not open to any Authentik account
-3. **Applications → Outposts** → edit the embedded outpost → add `docs-proxy` to its assigned providers. The embedded outpost runs as part of Authentik itself, reachable at `10.0.0.4:9000` under the `/outpost.goauthentik.io/` path prefix — no separate container needed.
+1. Create a Proxy Provider named `docs-proxy`.
+   - Mode: Forward auth (single application).
+   - External host: `https://docs.ugaktp.com`.
+   - Authorization flow: the flow configured for `ktpapp`.
+2. Create the KTP Docs application using that provider and bind the member-group access policy.
+3. Assign `docs-proxy` to the embedded outpost.
+
+The documented outpost address is `10.0.0.4:9000`, with routes under `/outpost.goauthentik.io/`.
 
 ### Traefik side
 
-`docs.ugaktp.com` is deployed on the **Dokploy VM** (10.0.0.7), which auto-regenerates its own Traefik domain config (`/etc/traefik/config/dokploy-domains.yml`) — hand-editing that file directly gets silently reverted (the same trap already known from the Dokploy-domains gotcha elsewhere in these docs). So:
+The docs site runs on the Dokploy VM at `10.0.0.7`. Dokploy regenerates `/etc/traefik/config/dokploy-domains.yml`, so manual edits to that file may be overwritten.
 
-- **Check Dokploy's own UI first** for a per-app "Advanced"/"Labels" section to attach custom Traefik middleware — that's the correct place if it exists, since it won't conflict with what Dokploy regenerates.
-- **If not available**, add a separate dynamic config file outside Dokploy's managed file (e.g. `/etc/traefik/config/ktp-docs-auth.yaml`):
+Use Dokploy's per-application middleware configuration if available. Otherwise, define the middleware and outpost route in a separate dynamic configuration file such as `/etc/traefik/config/ktp-docs-auth.yaml`:
 
 ```yaml
 http:
@@ -72,10 +57,7 @@ http:
           - X-authentik-email
 
   routers:
-    # Must have higher priority than the docs router — handles the actual
-    # login redirect/callback, which needs to reach Authentik directly,
-    # not the docs backend. Missing this router is the most common way
-    # this setup breaks (login redirect loops).
+    # Set this higher than the main docs router's priority.
     docs-outpost-auth:
       rule: "Host(`docs.ugaktp.com`) && PathPrefix(`/outpost.goauthentik.io/`)"
       service: authentik-outpost
@@ -88,20 +70,18 @@ http:
           - url: "http://10.0.0.4:9000"
 ```
 
-Then attach the `authentik-forwardauth` middleware to whichever router already serves `docs.ugaktp.com` (Dokploy likely already created this router — you're adding a middleware reference to it, not recreating it, to minimize conflict with what Dokploy manages).
+Attach `authentik-forwardauth` to the main docs router. The outpost route must reach Authentik directly, without passing through the same authentication middleware.
+
+The example priority of 10 must be adjusted if the main router has a higher priority. Confirm the effective priorities in the deployed configuration.
 
 ### Troubleshooting
 
-**Login redirect loops instead of reaching the docs:** almost always means the `docs-outpost-auth` router (or Dokploy-UI equivalent) is missing or has lower priority than the main docs router — the callback needs to hit Authentik directly at `/outpost.goauthentik.io/...`, not bounce through the docs container.
-
-**"403 Forbidden" after logging in successfully:** check the `KTP Docs` application's policy bindings in Authentik — the logged-in account's group isn't included.
+| Symptom | Check |
+|---|---|
+| Login redirect loop | Outpost router exists, outranks the docs router, and forwards the outpost path directly to Authentik |
+| 403 after login | KTP Docs policy bindings and the account's groups |
+| Configuration changes disappear | The change was made through Dokploy or in a separate file, not its generated domain file |
 
 ## Contributing
 
-If you’re contributing to this site:
-
-- Write Markdown (or MDX)
-- Commit and push your changes
-- Wait for the nightly rebuild ✨
-
-See [Intro to KTP Docs](../intro.md) for more information.
+Edit the Markdown or MDX, run the docs build, then commit and push. The nightly deployment picks up merged changes. See [Intro to KTP Docs](../intro.md).

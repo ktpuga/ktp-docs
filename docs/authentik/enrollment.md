@@ -4,144 +4,98 @@ sidebar_position: 2
 
 # Enrollment & Invitations
 
-New members are onboarded through Authentik's invitation system. Admins create a typed invitation link that auto-assigns the user to the correct group when they register.
-
----
+Invitations send new users through `ktp-enrollment` and identify the intended role. Authentik creates the login account; the website then synchronizes an application profile.
 
 ## How It Works
 
-1. **Admin creates an invitation** in Authentik with the target group
-2. **User clicks the invite link** → goes through the `ktp-enrollment` flow
-3. **User sets their UGA email, username and password** (confirmed with a repeat field)
-4. **Group is assigned** automatically via expression policy
-5. **User logs in** → website syncs their profile to the database → redirected to complete-profile if needed
-
----
+1. An administrator creates an invitation with a target group.
+2. The user follows it through enrollment.
+3. The form collects email, username, password, and password confirmation.
+4. A policy assigns the group.
+5. The website synchronizes the account and requests any missing profile fields.
 
 ## Creating an Invitation
 
-1. Go to **Authentik admin panel → Directory → Invitations**
-2. Click **Create**
-3. Set:
-   - **Flow:** `ktp-enrollment`
-   - **Custom attributes:**
-     ```json
-     {"group": "active"}
-     ```
-     Replace `"active"` with the appropriate group (`pledge`, `eboard`, `chair`, `alumni`)
-4. Copy the invite link and send it to the new member
+In Authentik's invitations list, create a link for `ktp-enrollment` and set custom attributes:
 
-The custom attribute value is loaded into the enrollment flow's `prompt_data` context and picked up by the group assignment policy.
+```json
+{"group": "active"}
+```
 
----
+Use the intended existing group, such as `pledge`, `eboard`, `chair`, `alumni`, or `rush`. Set expiry and Single use explicitly, then send the link.
+
+The Authentik API calls these attributes `fixed_data`. During the flow, the invitation data is read from `prompt_data`. These names apply at different points and are not interchangeable.
 
 ## Enrollment Flow: `ktp-enrollment`
 
 ### Stage Bindings
 
-| Order | Stage | Type | Notes |
-|-------|-------|------|-------|
-| 10 | enrollment-invite | Invitation Stage | Validates the invitation token |
-| 20 | enrollment-prompt | Prompt Stage | Prompts for UGA email + username + password + password repeat |
-| 30 | enrollment-user-write | User Write Stage | Writes the new user to Authentik |
-| 100 | enrollment-user-login | User Login Stage | Logs the user in + runs group assignment policy |
+| Order | Stage | Type | Purpose |
+| --- | --- | --- | --- |
+| 10 | `enrollment-invite` | Invitation | Validate invitation |
+| 20 | `enrollment-prompt` | Prompt | Collect email and login fields |
+| 30 | `enrollment-user-write` | User Write | Create the account |
+| 100 | `enrollment-user-login` | User Login | Establish session; group policy runs on this binding |
 
-> **Important:** Attach password and email rules as **Validation Policies on the Prompt Stage**, never as a policy binding on the flow's stage binding. Authentik's *default* validation policies crashed enrollment once and were removed; the reason, and why re-attaching them is not the fix, is under [Password requirements](#password-requirements).
+Attach submitted-field checks as **Validation Policies on the Prompt Stage**. A policy on a flow's stage binding instead controls whether that stage runs.
 
 ### Password requirements
 
-Passwords live entirely in Authentik. ktp-api and the website never see, store, or validate one, so **there is nothing to change in either repo** — this is Authentik admin configuration.
+Passwords are handled by Authentik, not by application profile validation. Inspect the deployed Prompt Stage and its validation policies to establish the current requirements. Earlier notes recorded weak-password acceptance; that is not a fresh check of production configuration.
 
-Right now there are effectively **no password requirements at all**: a rushee can enroll with `a`. Fixing that means adding a *Password Policy*, which is not the same object as the default validation policies that were removed.
+#### Diagnosing a rejected password {#why-the-previous-attempt-failed}
 
-#### Why the previous attempt failed
+A Password Policy's **Password field** must match the password prompt's **Field Key**. A mismatch can produce `Password not set in context` and reject every submission.
 
-Almost certainly a **field-name mismatch**, not a real crash.
+This is a hypothesis to check against the policy configuration and logs, not proof of the cause of every `Password Invalid` message.
 
-Authentik's Password Policy reads the submitted password out of the flow's prompt context, using whatever key its `Password field` setting names (default: `password`). If that key isn't in the context — because the custom `enrollment-prompt` stage names its field something else — the policy doesn't skip or pass. It **fails**, with `Password not set in context`.
+#### Where to attach validation {#two-places-policies-attach-and-only-one-is-right}
 
-That renders as `Password Invalid` on the enrollment form, for *every* signup, no matter how strong the password is. Which matches the symptom in [Troubleshooting](#troubleshooting) exactly, and explains why stripping every validation policy was what made enrollment work again.
-
-So the fix is not a different kind of policy — it's the same kind, with `Password field` actually matching the prompt.
-
-#### Two places policies attach, and only one is right
-
-This distinction is the whole game:
-
-| Where | What it does | Use for passwords? |
-|---|---|---|
-| **Stage's `Validation Policies`** (on the Prompt Stage itself) | Runs when the form is **submitted**; a failure shows the policy's error message next to the form and the user retries | **Yes** |
-| **Policy Binding** on the flow's Stage Binding | Decides whether the stage **runs at all**; a failure makes Authentik **skip the stage** | **No** |
-
-Binding a password policy in the second place doesn't reject weak passwords — it silently skips the prompt that collects them.
+| Location | Effect |
+| --- | --- |
+| Prompt Stage → Validation Policies | Validate submitted form data and report errors |
+| Flow Stage Binding → Policy Binding | Decide whether the stage runs |
 
 #### Setup
 
-1. **Find the real field key first.** Flows and Stages → Stages → `enrollment-prompt` → Edit → look at its **Prompts**, open the password one, read its **Field Key**. It's often `password`, but read it rather than assume — this is the step the previous attempt got wrong.
-2. **Customisation → Policies → Create → Password Policy.** Name it `ktp-password-strength`.
-3. Set **Password field** to the key from step 1.
-4. Set the rules — a reasonable baseline for a student org:
-   - Minimum length: `10`
-   - Uppercase / lowercase / digits / symbols: `0`
-   - Error message: *"Password must be at least 10 characters."*
-5. Attach it as a **validation policy on the stage**: Flows and Stages → Stages → `enrollment-prompt` → Edit → **Validation Policies** → add `ktp-password-strength`. **Not** a policy binding on the flow's stage binding — see the table above.
+1. Open `enrollment-prompt` and inspect the password prompt's Field Key.
+2. Create or edit a Password Policy using that key.
+3. Configure the chapter's chosen password requirements and a matching error message.
+4. Attach the policy under the Prompt Stage's Validation Policies.
+5. Test both rejected and accepted passwords with a disposable invitation.
 
-:::note If the prompt has a confirmation field
-A second password field (e.g. `password_repeat`) is matched by the Prompt Stage itself, not by this policy. The policy only needs the one key from step 1.
-:::
+The earlier proposed configuration used a ten-character minimum without composition rules. Treat that as a proposal to review, not a verified deployed policy or general security standard.
 
-:::tip Prefer length over character classes
-Composition rules (one uppercase, one symbol) push people toward `Password1!` and are worse than a longer minimum. Length is the requirement that actually helps here.
-:::
-
-:::danger Test with a throwaway invitation before rush opens
-Enrollment breaking is not a bug you find gradually — it breaks *everyone* signing up, during the two weeks of the year when signups matter, and the people hitting it are prospective members with no way to report it to you.
-
-Create a disposable invitation, run the whole flow in a private window, and confirm you can still enroll. Do this **before** rush signup opens, not after.
-
-Test in this order — the second case is the one that catches a field-name mismatch:
-
-1. A **weak** password (`abc`) → must be rejected with *your* error message, not `Password not set in context`
-2. A **strong** password (`correct-horse-battery`) → must enroll successfully
-
-Passing (1) but failing (2) is the signature of a wrong `Password field`: the policy is failing everything, not evaluating anything. If that happens, remove it from **Validation Policies** first and diagnose second — `docker logs` on the Authentik container shows the real reason.
-:::
+The confirmation prompt is checked by the Prompt Stage. Test a mismatch as well as matching values. If all inputs fail, inspect the field key, policy result, and logs before removing protections.
 
 #### Existing accounts
 
-A password policy applies at *enrollment and password change*, not retroactively. Members who enrolled with a weak password keep it until they change it. There is no forced-reset flow (it was removed — see [Password Reset for Existing Users](./overview.md#password-reset-for-existing-users)), so tightening this does not lock anyone out.
+Changing enrollment validation does not rewrite stored passwords. Check the password-change and recovery flows separately if the same rules should apply there. See [Password recovery](./overview.md#password-reset-for-existing-users).
 
 ### Collecting the UGA email at enrollment
 
-Enrollment used to collect username and password only, and the UGA address was first asked for at `/complete-profile` on the website. It is now collected on the enrollment form itself, so the address is on file from the moment the account exists.
+Collecting the address during enrollment lets a newly issued token provide it when the application first synchronizes the user.
 
 #### 1. Add the two prompt fields
 
-Flows and Stages → Stages → `enrollment-prompt` → Edit → **Prompts**.
+In `enrollment-prompt`:
 
 | Field Key | Type | Label | Required |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `email` | Email | UGA Email | Yes |
 | `password_repeat` | Password | Confirm Password | Yes |
 
-Authentik's Prompt Stage matches two password fields against each other itself, so `password_repeat` needs no policy. Order the fields email → username → password → password repeat.
+Order the prompts as email, username, password, and confirmation.
 
 #### 2. Enforce the UGA domain, with the alumni exemption
 
-Customisation → Policies → Create → **Expression Policy**, named `ktp-uga-email`:
+The documented `ktp-uga-email` Expression Policy is:
 
 ```python
 prompt_data = request.context.get("prompt_data", {})
 email = prompt_data.get("email", "").strip().lower()
 
-# Alumni lose their @uga.edu address at graduation, so theirs is the one
-# invitation that may carry a personal address. The group comes from the
-# invitation's custom attributes — the same place enrollment-assign-group reads
-# it, and the invitation stage runs at order 10, before this one at 20.
-#
-# An unknown or missing group REQUIRES a UGA address, matching requiresUgaEmail
-# in ktp-api: an unrecognised group is a signup, which is exactly the case this
-# rule exists for. Fail closed, not open.
+# Alumni invitations may use a personal address.
 if prompt_data.get("group") == "alumni":
     return True
 
@@ -154,58 +108,42 @@ ak_message("Please use your UGA email address (@uga.edu).")
 return False
 ```
 
-:::note If the alumni test case fails, the group isn't reaching `prompt_data` yet
-The alumni exemption depends on the invitation's custom attributes being in `prompt_data` by the time the *prompt* is validated, not just by the time the group is assigned at order 100. Test case 5 below is what proves it. If an alumni invitation with a personal address is rejected, that assumption is wrong for your Authentik version and the exemption needs a different discriminator — a second enrollment flow for alumni is the simplest one.
-:::
+Attach it as a Prompt Stage validation policy. The alumni exemption depends on invitation data being available when the form is validated. Verify that ordering in the deployed flow.
 
-Attach it under the stage's **Validation Policies**, alongside `ktp-password-strength`.
+Compare the parsed domain exactly or as a subdomain. A suffix check on the whole address would accept `notuga.edu`; a substring check could accept `uga.edu.attacker.com`. The API's `services/emails.js` provides the corresponding application rule.
 
-:::warning Split on the LAST `@`, and compare the parsed domain
-`email.rfind("@")` and the `== "uga.edu" or .endswith(".uga.edu")` pair are both load-bearing, and they mirror `isUgaAddress` in ktp-api's `services/emails.js` deliberately. A suffix check (`email.endswith("uga.edu")`) accepts `someone@notuga.edu`. A substring check accepts `someone@uga.edu.attacker.com`. Splitting on the first `@` reads `a@b@evil.com` as domain `b`.
-:::
+The domain check does not prove mailbox ownership.
 
 #### 3. Map the `email` scope so it reaches the database
 
-The address is written to the Authentik user by the User Write stage, but ktp-api only learns it if the token carries it.
+Select the provider's OpenID email mapping and request the email scope. Newly issued tokens can then carry the address. Check each client provider that synchronizes accounts.
 
-Applications → Providers → **ktpapp** → Edit → **Advanced protocol settings** → *Scopes* → add **`authentik default OAuth Mapping: OpenID 'email'`**.
-
-Members must sign out and back in once; the claim only appears on newly issued tokens.
-
-:::note `email_verified` is not evidence, and ktp-api ignores it
-That same mapping emits an `email_verified` claim. Nothing in this system ever sends mail to an address to prove someone owns it — the value is what they typed at enrollment — so `middleware/auth.js` deliberately does not gate on it. Authentik agrees: releases before 2025.10 hardcoded it to `true`, and it now defaults to `false` precisely because there is no authoritative source for it. The domain check is the real control.
-:::
+The API does not use `email_verified` as proof of ownership in this enrollment setup. Its synchronization path validates the address before storing it.
 
 #### How it reaches Postgres
 
-`POST /users/sync` runs on every login and seeds `users.email` from the claim, once:
+`POST /users/sync` seeds an empty `users.email` from a valid UGA token claim. It does not overwrite an existing address. A missing claim is tolerated, and an alumni personal address is not inserted into the UGA-email column.
 
-- **It fills an empty column and never overwrites.** Members can edit their UGA email on their profile, and this runs on every login, so mirroring would revert their correction each time they signed in.
-- **Only a UGA address may seed it.** `users.email` is the UGA address; `personal_email` is the other one. Since alumni are exempted above, their enrollment carries a personal address, and ktp-api re-checks the domain rather than trusting the flow. A misconfigured policy cannot put the wrong kind of address in the wrong column.
-- **A missing claim is fine.** Nothing breaks before step 3 is done, which is why the ktp-api half could ship first.
+`test/enrollmentEmail.test.js` covers the application behavior.
 
-Full reasoning is in the `/users/sync` note in `ktp-api/README.md`; the rules are pinned by `test/enrollmentEmail.test.js`.
+Test enrollment with:
 
-:::tip Test the order that catches the real mistakes
-With a throwaway invitation, in a private window:
+1. A non-UGA address: rejected for a non-alumni invitation.
+2. A lookalike such as `someone@notuga.edu`: rejected.
+3. A UGA subdomain such as `me@mail.uga.edu`: accepted.
+4. Mismatched password confirmation: rejected.
+5. An alumni invitation with a personal address: accepted.
 
-1. A **non-UGA** address (`someone@gmail.com`) → rejected with your message
-2. A **lookalike** (`someone@notuga.edu`) → rejected. If this one passes, the policy is doing a suffix check
-3. A **subdomain** (`me@mail.uga.edu`) → accepted
-4. **Mismatched** password and repeat → rejected by the stage itself
-5. An **alumni** invitation with a personal address → accepted
-
-Then sign in and confirm the address is on the profile without anyone typing it at `/complete-profile`.
-:::
+Then sign into the website and inspect the resulting profile.
 
 ### Group Assignment Policy
 
-The `enrollment-assign-group` expression policy runs at order 100 on the User Login stage binding:
+The documented policy runs on the User Login stage binding at order 100:
 
 ```python
 from authentik.core.models import Group
 
-group_name = context.get("prompt_data", {}).get("group")  # NOTE: prompt_data, not fixed_data
+group_name = context.get("prompt_data", {}).get("group")
 if group_name and request.user:
     try:
         group = Group.objects.get(name=group_name)
@@ -216,101 +154,64 @@ if group_name and request.user:
 return True
 ```
 
-> The invitation's Custom attributes are loaded into `prompt_data` (not `fixed_data`). Using `fixed_data` will cause group assignment to silently fail.
+This version leaves an unknown or missing group unassigned. The [Rush Signup](../website/rush-signup.md#groupless-accounts-default-to-rush) page describes an optional missing-value fallback to `rush`. Check which version is deployed rather than assuming they behave identically.
 
----
+Group names must already exist and match exactly. Check successful assignment after a test registration, not just whether the flow completes.
 
 ## After Registration
 
-Once enrolled, the user logs in at [ugaktp.com](https://ugaktp.com):
+1. Website login calls `POST /users/sync`.
+2. An incomplete application profile leads to `/complete-profile`.
+3. `PUT /users/me/profile` validates and saves the profile.
+4. The website updates its session and routes to the appropriate portal.
 
-1. Website calls `POST /users/sync` → creates DB row with `profile_complete = false`
-2. Middleware detects `profile_complete = false` → redirects to `/complete-profile`
-3. User fills in their profile (name, major, graduation date, etc.)
-4. `PUT /users/me/profile` sets `profile_complete = true`
-5. Session is updated, user is redirected to their portal
+### Prevent enrollment from changing an existing account
 
-:::danger Enrollment can RENAME an existing account instead of creating one — confirmed 2026-08-09
-An eboard member signed out, opened rush signup on the same browser, and created a rush account. **No new user was created.** Their existing Authentik user was renamed to the rush username and gained the `rush` group, keeping its original groups and its `sub` — so signing in afterwards returned their real account under the wrong name, with their profile intact and the profile builder correctly skipped.
+The recorded enrollment incident involved an authenticated browser updating its existing Authentik user instead of creating a new account.
 
-The cause is that the enrollment flow was reachable by a browser Authentik still considered authenticated. Authentik's User Write stage writes to `pending_user`, which for an authenticated request **is the signed-in user**, so the flow updates them instead of creating anybody.
+The documented safeguards are:
 
-Two settings close it, and both are worth having:
+| Setting | Value |
+| --- | --- |
+| Enrollment flow Authentication | Require unauthenticated |
+| User Write stage User creation mode | Always create |
 
-| Where | Set to | Why |
-|---|---|---|
-| Flows → `ktp-enrollment` → **Authentication** | **Require unauthenticated** | Authentik refuses the flow outright for a signed-in browser, rather than picking a victim to write to |
-| Stages → `enrollment-user-write` → **User creation mode** | **Always create** | Removes the fall-through to updating `pending_user` even if the first guard is ever loosened |
+Verify both in Authentik. Printed invitations reach Authentik directly, so a website-only guard does not cover every entry point.
 
-**And this is why the browser was still authenticated:** signing out of the website was confirmed 2026-08-09 not to sign the browser out of Authentik. **Providers → ktpapp → Invalidation flow** must contain a `user_logout` stage — `default-provider-invalidation-flow` has no stages at all and so ends only the application session, which is what new OAuth2 providers default to. It is a trap because logout still looks like it worked. Ours is now `ktpapp-invalidation`, which adds a Redirect stage so sign-out also lands back on ugaktp.com. Full detail in [Sign-In Flow](../website/sign-in.md#two-sessions-in-one-browser).
+Website logout and Authentik logout are separate operations. The documented `ktpapp-invalidation` flow includes user logout and a redirect back to the website. See [Two sessions in one browser](../website/sign-in.md#two-sessions-in-one-browser).
 
-**No website change can prevent this.** The signup URL points straight at Authentik and is printed on flyers as a QR code, so the site is never in the loop. It has to be fixed here.
+If an existing account was renamed or gained the wrong role, verify the intended identity, repair it in Authentik, and establish a fresh website session. Synchronization then updates application fields from the fresh claims.
 
-**Repair for an account this happened to:** rename it back and remove the `rush` group in Authentik, then have them sign in again — `POST /users/sync` re-mirrors both `username` and `member_group` from the fresh token, so the database self-heals. Nothing needs editing in Postgres by hand.
-:::
+### Switching accounts after enrollment
 
-:::warning Enrolling replaces Authentik's session for that browser
-Finishing this flow logs the browser in as the new account — that's the `enrollment-user-login` stage at order 100. If someone **else** was already signed in to the site on that browser, Authentik now holds the new account while the site's own cookie still holds the old one, and the two disagree with nothing to reconcile them.
+Enrollment establishes the new Authentik session while an older website cookie may still exist. `/auth/start` uses a chooser when it cannot safely identify the intended account.
 
-The website handles this at `/auth/start`, where every enrollment lands: a session that doesn't obviously belong to whoever just enrolled gets a **chooser** rather than a redirect. Before that guard existed, the new user was dropped into the previous user's portal, and the previous user's session was later silently rewritten as the new one.
-
-This matters most for **rush invitations**, which are non-single-use and scanned off flyers, so the same physical phone or laptop can run the flow more than once. Full detail in [Sign-In Flow → Two sessions in one browser](../website/sign-in.md#two-sessions-in-one-browser).
-:::
-
----
+For a suspected mismatch, record the entry path and the accounts involved without copying tokens. Do not assume a logout alone proves that stored identity data was unaffected.
 
 ## Groups in Authentik
 
-Groups must be created in Authentik before invitations referencing them will work.
+| Group | Portal |
+| --- | --- |
+| `eboard` | `/admin` |
+| `chair` | `/member` |
+| `active` | `/member` |
+| `alumni` | `/alumni` |
+| `pledge` | `/pledge` |
+| `rush` | `/rushee` |
+| `admin` | Infrastructure only |
 
-To check/create groups: **Directory → Groups**
-
-Required groups:
-
-| Group Name | Portal |
-|-----------|--------|
-| `eboard` | /admin |
-| `chair` | /member |
-| `active` | /member |
-| `pledge` | /pledge |
-| `alumni` | /member |
-| `admin` | (system only) |
-
-Group names are **case-sensitive** and must match exactly what's used in the invitation's custom attributes JSON and the website middleware.
-
----
+Group priority is `eboard > chair > active > alumni > pledge > rush`. Names are case-sensitive.
 
 ## Troubleshooting
 
-**User doesn't get assigned to a group:**
-- Check that the Custom attributes JSON is valid: `{"group": "active"}` (double-quoted keys and values)
-- Verify the expression policy uses `context.get("prompt_data", {})` not `fixed_data`
-- Confirm the group name in Authentik matches exactly
+| Symptom | Check |
+| --- | --- |
+| No group after signup | Invitation attributes, `fixed_data` versus flow `prompt_data`, exact group name, assignment policy |
+| Every password rejected | Password Field Key, policy attachment, and actual policy error |
+| Email rejected inconsistently | Authentik policy versus `services/emails.js`; alumni invitation data |
+| Profile completion repeats | Profile API result and subsequent website session update |
+| Wrong portal with correct Authentik membership | Session group claims and a fresh login |
+| Stored role unexpectedly shows rush | `group_defaulted` handling and provider groups mapping |
+| Unexpected username or account switch | Enrollment account-creation settings and the two-session flow |
 
-**"Password Invalid" error during enrollment:**
-- Remove all validation policies from the `enrollment-prompt` Prompt Stage binding
-- If you were adding password requirements, remove the policy from the stage's **Validation Policies** first, then check its **Password field** matches the prompt's actual **Field Key**. A mismatch makes the policy fail *every* password with `Password not set in context`, which renders as this exact error — see [Password requirements](#password-requirements)
-
-**Signup rejects a valid-looking email:**
-- The rule is enforced in **two** places now, and they must agree: the `ktp-uga-email` expression policy on the enrollment prompt (see [Collecting the UGA email](#collecting-the-uga-email-at-enrollment)) and `services/emails.js` in ktp-api, which backs `/complete-profile`. Both accept `uga.edu` and any subdomain, nothing else, and both exempt alumni
-- If enrollment accepts an address that `/complete-profile` then rejects, the two have drifted — compare the policy against `isUgaAddress`
-
-**User stuck on /complete-profile after submitting:**
-- Check API logs on LXC 119: `docker logs ktp-api`
-- Confirm `PUT /users/me/profile` returns 200 — if it errors, the session update won't fire
-
-**User in wrong portal:**
-- Check their groups in Authentik: **Directory → Users → select user → Groups tab**
-- Group priority: `eboard > chair > active > alumni > pledge`
-- The DB `member_group` updates on every login via `/users/sync`
-- If Authentik looks right but the **portal** is still wrong, the website session's `groups` are stale. They now refresh with the access token (from the refreshed `id_token`), so this should resolve within the access token's lifetime — signing out and back in forces it immediately
-
-**A member suddenly displays as "Rushee" but Authentik still shows their real group:**
-- This is `member_group` in Postgres, not Authentik. `middleware/auth.js` supplies `rush` when a token carries no group it recognises — a safety net so a misconfigured account isn't locked out of everything — and `syncUser` used to write that guess into `users.member_group`, where every badge reads it
-- Fixed: `req.user.group_defaulted` marks the guess, and `upsert`'s `preserveMemberGroup` lets it fill an empty column but never overwrite a known group. **Any new code that writes based on `req.user.groups` must check the same flag**
-- To repair an account already stamped: one sign-in carrying real groups rewrites the column. If it persists, the token genuinely isn't carrying `groups` — check the OIDC provider's **groups** scope mapping
-
-**Username or roles changed on their own:**
-- Almost always two accounts on one browser: someone enrolled or signed in as a different user on a device where another account was already open. See [Sign-In Flow → Two sessions in one browser](../website/sign-in.md#two-sessions-in-one-browser)
-- Nothing is corrupted in Authentik or the database — sign out fully (which ends the Authentik session too) and sign back in
-- If it happened *after* the chooser shipped, that's a real bug. Get the two usernames involved and whether they arrived by QR code or by the link on `/rush/how-it-works`
+API fallback groups must retain `group_defaulted` provenance when code writes a stored role. A guessed `rush` value should not overwrite a known membership.

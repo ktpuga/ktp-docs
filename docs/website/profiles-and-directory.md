@@ -6,320 +6,168 @@ sidebar_position: 4
 
 ## Usernames
 
-Members change their own username from **Settings**, inline on the header card (`components/profile/UsernameEditor.jsx`). It was eboard-managed until 2026-08-07.
+`UsernameEditor.jsx` lets members rename their account from Settings through `PUT /users/me/username`. This changes their Authentik login identifier as well as the application display value.
 
-:::warning A username is a login credential, not a profile field
-This is the only thing on the Settings page that writes to **Authentik** as well as our database, because Authentik owns login identifiers — the new name is what the member types to sign in.
+The API writes Authentik first, then Postgres. A failed mirror can be repaired by later synchronization. Profile updates do not write `username` from an older access token.
 
-The order is fixed: **Authentik first, then Postgres.** A name Authentik rejects as taken leaves both systems untouched; writing ours first would leave the portal showing a username the member cannot actually log in with.
+Validation allows 3 to 32 characters from `[a-zA-Z0-9._-]`. Authentik service-account permissions must allow user changes. A collision returns `409`; an upstream failure returns `502`.
 
-It also needs an Authentik permission that is **not granted by default** — see [Authentik: `Can change User`](../authentik/overview.md#api-tokens--service-accounts). Without it every rename returns `502`. That missing grant is why the first attempt at this feature was reverted.
-:::
+The Server Action returns expected failures as `{ error }` so production React error masking does not replace the explanation. Username saving is separate from the profile form.
 
-It is a **separate endpoint** (`PUT /users/me/username`) and a separate control from the main profile form, rather than another field in it. A rename can fail with something the member has to act on — "that name is taken" — and inside the main form that failure surfaces as a whole-form error on a save that was really about their bio.
-
-Two behaviours that look like bugs and are not:
-
-- **`upsert` re-syncs the username on every login.** That is what stops Postgres drifting from Authentik: an eboard rename made directly in Authentik reaches the portal at next sign-in, and a rename that succeeded in Authentik but failed to mirror repairs itself.
-- **`updateProfile` deliberately does not write `username`.** It receives the value from the access token, which still carries the *old* name for the rest of the session after a rename — so writing it would silently undo the rename the next time the member edited anything else.
-
-Validation (`services/usernames.js`) is deliberately permissive: 3–32 characters of `[a-zA-Z0-9._-]`. Length matters because the portal renders `@name` inside table cells; ASCII-only matters because mixed-script homoglyphs let two visually identical usernames exist in a directory people scan by eye rather than read.
-
-:::warning The server action must return `{ error }`, never throw
-Every failure here is one the member has to read — "that name is taken", "renames are unavailable right now". A **thrown** Server Action error has its message replaced in production by React's generic *"An error occurred in the Server Components render"* (error **#441**), so throwing turns all of them into that one string.
-
-This shipped wrong on the first deploy: the Authentik 403 became a 502, the 502 threw, and the member saw React #441 rendered as the field's error message. `updateUsername` in `lib/portal-api.js` now returns `{ error }`, matching `uploadProfilePicture`. Any new action whose failure is meant to be read by a person needs the same treatment.
-:::
-
-Usernames are **display-only everywhere else** — every lookup, foreign key and permission check uses `authentik_id`, so a rename breaks nothing. The one place it lingers is history: the moderation queue and activity log record `@name` at the time of writing, so a report filed against an old name still shows that name. Renames are themselves recorded in the [activity log](./activity-log.md), since it captures every mutating request.
-
----
+Application identity and foreign keys use `authentik_id`. Historical audit/report labels may retain the name recorded at the time. Rename operations are audited.
 
 ## What you're doing now, and your own links
 
-Two fields added 2026-08-11.
+`doing_now` is an optional free-text line, commonly used for alumni work or study. The API validates it for every role even when a particular form does not display it.
 
-**Both "what you're doing now" and your links now appear on the public roster.** The original scope was member-side only for both, and both were reversed: an alumnus saying what they're up to, with a link to their portfolio, is the point of a public alumni page. Anyone who would rather not be on that page at all can turn themselves off it entirely, below.
+Members can add up to five labeled web links. Incomplete rows return a row-specific error; empty unfilled UI rows are omitted.
 
-That makes the render-time URL check load-bearing rather than defensive. A list of arbitrary member-supplied URLs rendered as live hrefs on an **unauthenticated** page is the highest-exposure thing on the site, so the roster card runs every one through `safeExternalHref()` before rendering and drops anything that isn't plain `http(s)` — it does not trust that write-time validation covered rows written before that validator existed.
-
-**"What you're doing now"** is one line of free text for what an alumnus is up to after graduation: *"SWE at Google"*, *"Law school at Emory"*, *"Taking a year off"*. Free text rather than a company/title pair precisely so it can hold the second and third of those as comfortably as the first. It shows directly under the badges on a directory card, because for an alumnus it is usually the thing somebody opened the profile to find out.
-
-**Links** are up to five labelled URLs, shown as chips at the bottom of the card. The row wraps and re-spaces as links are added.
-
-Only alumni are *asked* for the "doing now" field, but the column is on every member and the API validates it for everyone. That is deliberate and follows `about_me`: a column gated to one group has to be migrated the day somebody changes group, which happens here every spring. Eboard's edit-anyone modal shows both fields for everybody, since the point of that modal is correcting what someone typed into the wrong box.
-
-:::warning Links are an href, which is not the same as text
-Every link URL is validated and stored canonicalised by the API, and validated *again* by the website before it is rendered. That is not redundancy for its own sake. React escapes a hostile string rendered as text, and does nothing whatsoever about `javascript:` inside an `href` — and `new URL()` is not a check either, since it parses `javascript:alert(1)` perfectly happily. This exact pair was already got wrong once in document links.
-
-A link that fails validation renders as **no chip**, rather than a dead or hostile one.
-:::
-
-A link with a label but no address, or an address with no label, is rejected with a message naming the row. An empty row you added and never filled in is simply dropped, so clicking "Add a link" and changing your mind never fails the save.
+Both fields can appear on the public roster for eligible members. Public cards check links with `safeExternalHref()` before rendering; rejected URLs produce no chip. Write-time validation and rendering checks both matter for older stored rows.
 
 ## Pronouns
 
-Optional, set by the member on their own profile form. A dropdown of common presets — he/him, she/her, they/them, he/they, she/they — plus **Custom…**, which reveals a free-text box.
+The profile form offers common presets and a Custom field. The API accepts optional text up to 40 characters rather than limiting values to the presets. No answer stores null and renders nothing.
 
-The presets are a **convenience, not a vocabulary**. The column is plain `TEXT` and the API validates only the length (≤40), so the Custom box is a real escape hatch rather than a sixth preset. Nothing checks the value against the list, deliberately: a list of pronouns is never complete, and an enum would need a migration per person to fix that.
-
-Choosing nothing stores `NULL`, which is *unanswered* rather than an answer. The directory renders nothing at all for it — not an empty pill, and not "prefer not to say" as though it were a stated position.
-
-:::caution Member portal only, and the public roster must stay that way
-Pronouns appear on the directory card and the profile modal, both behind login. They are **not** on the public `/members-list` roster.
-
-That is enforced by the SELECT lists in `models/memberModel.js` — `findPublicRoster` and `findPublicRosterMember` do not name the column — and by nothing else. `/members-list` is unauthenticated and search-indexable, and somebody can be out inside the chapter without being out on a public web page.
-
-`test/pronouns.test.js` asserts both directions against the real model source: absent from the two public queries, present in the two portal ones. If that call is ever reversed, reverse it deliberately rather than letting it arrive with a `u.*`.
-:::
+Pronouns are portal-only. Public roster queries must omit them, including direct public member lookups. `test/pronouns.test.js` checks the projections.
 
 ### Eboard's edit modal renders the field because it must
 
-`components/profile/PronounsField.jsx` is shared by the member's own form and eboard's `AdminEditProfileModal`, for the same reason `LinksField` is: the admin write is **whole-row**, and both forms build their body with the shared `buildProfilePayload`. A modal that rendered no pronouns input would still send `pronouns: null` and blank the member's answer every time eboard corrected their major — which is exactly the bug `links` once had.
+`PronounsField.jsx` is shared with `AdminEditProfileModal`. The admin profile write replaces all profile fields, so the modal must retain existing pronouns and other values while editing unrelated fields.
 
 ## Birthdays
 
-The directory profile panel shows a member's birthday as **month and day only** — "March 14", never a year.
-
-That is not a display choice. `GET /members` returns a `birthday` field formatted as `MM-DD` **in SQL**, and the raw `dob` column is not in the projection at all:
+Directory responses expose only month and day:
 
 ```sql
 TO_CHAR(dob, 'MM-DD') AS birthday
 ```
 
-:::warning The year never leaves Postgres, and that is the whole design
-The chapter wanted birthdays so people can say happy birthday. A full date of birth published to ~100 members also publishes **everyone's age**, which nobody asked for and which a member cannot take back once it has been on a page.
+The raw birth date is not included in ordinary directory projections. Public roster queries expose neither `dob` nor `birthday`. Missing birthdays render no row.
 
-Formatting in the query rather than in the client means no consumer of `/members` can recover the year — not the website, not the iOS app, not anything written later. Adding `dob` to that `SELECT` would undo it in one word, so a test asserts against the real query source rather than trusting this paragraph.
-:::
-
-:::note Formatted in SQL, not in JavaScript — this is a correctness bug, not a preference
-`dob` is a `DATE`. Handing `"1998-03-14"` to `new Date()` parses it as **UTC midnight**, which renders as the 13th in any negative-offset timezone, including this chapter's. Everyone's birthday would show one day early, and a January 1st birthday would appear as December 31st.
-
-`TO_CHAR` never converts a timezone, so the day cannot shift. `formatBirthday` on the website builds the label from the month and day as separate numbers for the same reason — it never constructs a `Date` from the string. This is the same trap `services/validate.js` documents as `dateOnly`.
-:::
-
-**Absent for most of the chapter.** `dob` is optional on the profile form, so `birthday` is `null` for anyone who never filled it in and the row simply does not render.
-
-**Portal only.** The public roster queries (`findPublicRoster`, `findPublicRosterMember`) select neither `dob` nor `birthday`, exactly as they omit `pronouns`. `/members-list` is unauthenticated and indexable; a birthday behind the portal login is a different thing from one on the open internet.
+Formatting in SQL avoids converting a calendar date through UTC. Website `formatBirthday` builds a label from separate month/day values without parsing the stored string as a timestamp.
 
 ## Traits
 
-Eboard can type up to six short **captions** onto any member: *Pledge Chair*, *Fintech*, *Atlanta, GA*. Each is one plain string, up to 80 characters.
+Eboard can assign up to six string captions, each up to 80 characters. `CaptionPill` renders them alongside role information in the directory and public roster.
 
-They render as **pills beside the member's group badge**, on the directory card, in the profile modal, and on the public roster — deliberately the same treatment a chair's committee caption gets. A trait reading "Pledge Chair" should be indistinguishable from the caption a real chair gets, which is the point of them, so both come from one `CaptionPill` component rather than two lookalike styles that can drift.
+Migration `1788200000000` converted the former label/value objects into strings. `traitText()` also handles legacy objects so they are not passed directly as React children.
 
-:::note They used to be label/value pairs
-Until migration `1788200000000` a trait was `{ label, value }` and rendered as a bordered definition list down the card. That shape made eboard invent a label for things that don't have one, and it read as a table rather than a caption. Existing rows were converted by joining the halves as `"label: value"`.
+Traits are display text, not permission-bearing roles. They use the eboard-only `PUT /admin/users/:id/traits` endpoint and are not accepted as ordinary profile fields.
 
-Both cards coerce an un-migrated pair through `traitText()` rather than rendering it directly. React **throws** on an object child, so without that, deploying the site before running the migration would take the public roster down rather than merely look wrong.
-:::
-
-This generalises the exec title, which is the same idea fixed to one label. Traits stay free text on purpose; the exec title became a row in [`exec_roles`](../api/overview.md#exec_roles-table) because code needs to *identify* a role, and nothing needs to identify a trait.
-
-Set them from **Admin → Users → Edit** on any member. Up to six, label ≤40 characters, value ≤80.
-
-:::info Why members can't set their own traits
-These land on a page with no authentication, so they are chapter-authored rather than self-authored. That distinction is enforced by the *routes*, not by a permission check: `traits` is deliberately not one of the profile fields, so there is no shape of request to `PUT /users/me/profile` that reaches the column. The only writer is the eboard-only `PUT /admin/users/:id/traits`.
-
-A member's own free-text field is **"What you're doing now"** above — that one is theirs, and it is also public.
-:::
-
-Traits save through their own endpoint, so the edit modal performs two writes behind one Save button. Traits go first on purpose: a rejected trait then leaves the rest of the profile untouched, rather than reporting an error on a form whose other changes have already been committed.
+The admin Save operation writes traits before the profile. A rejected trait therefore prevents the later profile write, but the two requests are not a transaction.
 
 ## Choosing not to be on the public roster
 
-**Settings → Public Roster** controls whether a member appears on [ugaktp.com/members-list](https://ugaktp.com/members-list), the chapter page anyone on the internet can load. Everyone is on it by default, exactly as before this setting existed.
+**Settings → Public Roster** controls public listing eligibility. Eligible profiles are included by default unless opted out.
 
-Turning it off does two things, and the second is the one that matters: the member disappears from the list, **and** their photo stops being served from the public media route. Hiding someone from the list alone would leave their picture fetchable by anyone who knew their id, which is a promise the toggle would not be keeping.
-
-Nothing inside the portal changes. They stay in the member directory, keep their profile, and everything else they filled in was never public in the first place. Before this shipped, the only way off the roster was to delete your profile picture, which also removed you from the directory everybody actually uses.
-
----
+Opting out removes the profile from public list/detail access and prevents the public media route from serving its picture. It does not remove the profile from the authenticated member directory.
 
 ## Profile pictures
 
-Members upload a profile picture from **Settings** (or during onboarding at `/complete-profile` — both use the same shared `ProfileForm` component). Uploading happens immediately on file select, independent of the rest of the profile form's save button — you don't need to click a separate "Save" to update just your picture.
+Settings and onboarding use the shared profile-picture control. Selecting a file starts upload independently of the profile Save button.
 
-Uploads accept **JPEG, PNG, WebP, HEIC/HEIF, AVIF, GIF, and TIFF** up to **25MB**, and are converted server-side to a resized JPEG before storage — so members can upload straight from a phone camera roll without converting anything first. See [API: `PUT /users/me/profile-picture`](../api/endpoints.md#put-usersmeprofile-picture) for why the conversion exists and what it does to EXIF data.
+Accepted formats are JPEG, PNG, WebP, HEIC/HEIF, AVIF, GIF, and TIFF, up to 25 MB. The server creates a resized JPEG. See [Profile-picture upload](../api/endpoints.md#put-usersmeprofile-picture) for processing and decoder limitations.
 
-Pictures are stored in Immich and served through `/api/users/:id/profile-picture/media`, which is generalized to **any** member's id, not just your own — this is what lets the Directory, `/admin/users`, and message threads all show other members' pictures. If a member hasn't set one, the request 404s and the UI falls back to showing their initials.
+The website proxies pictures through `/api/users/:id/profile-picture/media`. Missing images return `404` and display initials. Existing portal components use an image error handler for fallback; follow that pattern when adding an avatar.
 
-:::warning Use `<img onError>`, not Radix `Avatar`
-The fallback is implemented with a plain `<img>` and an `onError` handler throughout the portal. Radix's `AvatarFallback` (in `components/ui/avatar.jsx`) has a real quirk where it can stay visible even after the image successfully loads — that produced an "avatars only ever show initials" bug here more than once. Prefer the plain pattern for anything new.
-:::
+A picture is one of the public-roster eligibility requirements, alongside the other roster filters.
 
-A profile picture is also what gets a member onto the [public roster](./overview.md#public-roster-members-list) — members without one are excluded from that page entirely.
+### Picture updates and caching {#changing-a-picture-updates-it-everywhere-and-that-took-work}
 
-### Changing a picture updates it everywhere, and that took work
+`lib/avatar.js` versions avatar URLs with the asset ID, which changes on upload. This refreshes changed pictures without adding a new timestamp on every render.
 
-Until 2026-08-11, changing your photo appeared not to work. The upload succeeded every time; what you were looking at was cache. The media proxy sends no `Cache-Control` and its URL is keyed on the member id alone, so the address of your picture was identical before and after the change and the browser had no reason to fetch it again. Every avatar in the portal was affected, plus the public roster.
-
-The fix is a version on the URL, and the version is the **Immich asset id**. Immich issues a new asset per upload, so it changes exactly when the picture does and never in between. That last part matters as much as the first: a timestamp would also have busted the cache, and would have re-downloaded every avatar in the directory on every page load forever.
-
-All of it lives in `lib/avatar.js` on the website. Two consequences worth knowing:
-
-- **API responses now carry the asset id wherever they carry a member id**, including the public roster (`profilePictureAssetId`) and the blocked-members list (`profile_picture_asset_id`). A projection that omits it silently reverts the fix for that one surface, so it is covered by a test rather than by convention.
-- **The sidebar updates without a refresh.** It sits in a layout that reads your profile once per full page load, so a new URL alone would not have reached it. The upload broadcasts an event and the sidebar re-reads.
-
----
+API projections that support avatars need the version field. An upload also broadcasts the profile-picture-changed event so persistent layouts can refetch the current profile and update their avatar.
 
 ## The profile form
 
-One component, `components/profile/ProfileForm.jsx`, serves both onboarding at `/complete-profile` and Settings; eboard's "edit anyone" modal (`components/admin/AdminEditProfileModal.jsx`) is a deliberate non-reuse of it, but posts the same payload through `lib/profile.js`'s `buildProfilePayload`. On the API side both land in the **same normalizer**, so the rules cannot drift apart on the route with more authority. The per-field rules are documented once, at [API: `PUT /users/me/profile`](../api/endpoints.md#put-usersmeprofile).
+`components/profile/ProfileForm.jsx` serves onboarding and Settings. The separate admin modal shares `buildProfilePayload` and API validation but uses a different route and field visibility.
 
-Four of them are worth knowing here because the form is what produces the value:
+Key input rules:
 
-- **The onboarding form does not ask for the UGA email; the Settings form does.** The Authentik enrollment prompt collects the address now and `POST /users/sync` seeds it onto the row at first login, so it is already on file before anyone reaches `/complete-profile`. The field stays on the Settings form so it remains correctable.
+- Onboarding relies on the enrollment email already synchronized to the account. Settings can edit it.
+- `formData.has('email')` distinguishes an omitted input from an explicit clear. Non-alumni required-email validation can use a stored address when the key is absent.
+- Configure enrollment email collection before omitting it from onboarding; otherwise a required value may have no visible input.
+- Graduation is a season and four-digit year, not a timestamp.
+- Birth date is sent as `YYYY-MM-DD`.
+- `minors`, `gpa`, and `heard_from` appear on the rushee form. Hidden inputs are omitted so later member edits preserve recruitment data.
+- Admin writes replace all profile fields, so the admin modal includes recruitment fields for every target role.
 
-  The mechanism is worth reading before touching either form. `buildProfilePayload` uses `formData.has('email')` for this one key, so a form that does not render the input omits the key entirely rather than sending `null` — and the API treats those two differently: an **absent** key defers to the address already stored, while an **explicit null** is someone clearing the field and is still refused. Re-rendering the input on the builder without following that chain will 400 every first save.
+`formatGraduationDate` checks legacy ISO input explicitly and otherwise preserves the stored semester string. Passing `Fall 2027` to a permissive date parser can produce January instead.
 
-  :::warning Deploy order
-  Configure the Authentik prompt **before** shipping a website that omits the field. In between, a new non-alumni member has nothing seeding the column and no input to type into, so their first save is a 400 they cannot clear. The API keeps that 400 deliberately — the alternative is a `profile_complete` account with no UGA address, which is the one identity fact the chapter relies on.
-  :::
-
-
-- **Graduation is a semester and a year**, not a date. The form composes it from a `Spring`/`Fall` dropdown and a **free-text** four-character year box, so `"Spring abcd"` is something the real UI can submit; the API rejects it. Nothing is lost by that strictness, because `parseGraduationDate` already discards a value it cannot split back apart, leaving the picker blank and clearing the column on the next save. The client and the server agree.
-- **Date of birth is sent as `YYYY-MM-DD`**, which `<input type="date">` produces and `normalizeUserProfile` trims the stored timestamp down to. A value in any other spelling is a 400.
-- **The three rush interest fields (`minors`, `gpa`, `heard_from`) render for rushees only**, and use the same `formData.has` mechanism as the UGA email above — for a different reason and with higher stakes. See [Rush Portal: the interest form](./rush-portal.md#the-interest-form). `AdminEditProfileModal` renders them for *everyone*, because the admin route is a whole-row `UPDATE` that does not honour absent keys; the two forms disagree on purpose.
-
-:::danger Never pass a semester string to `new Date()` — the NaN guard will not catch it
-Fixed 2026-08-12. `formatGraduationDate` in `lib/portal-format.js` used to call `new Date(value)` on the stored value and fall back to the raw string only if the result was `NaN`. It never was: V8's lenient legacy date parser ignores the word it does not recognise and keeps the year, so **`new Date('Fall 2027')` is 1 January 2027**, not an Invalid Date.
-
-The guard therefore never fired, and every member's graduation rendered as "Jan &lt;year&gt;" — right year, wrong month, for the entire chapter at once, on both the profile card and the directory.
-
-It now matches an ISO prefix explicitly for legacy rows written before the column held a semester, and returns anything else as stored. The ISO branch rebuilds the date in **local** time from the captured month and year rather than passing the string to `new Date()`, which parses ISO as UTC midnight and lands on the previous month for anyone west of UTC — the same day-shift trap as `dateOnly` on the API side.
-:::
-
-:::warning `updateProfile` returns `{ error }` — the same rule as `updateUsername` above
-It used to go through `apiPut`, which **throws** on a non-ok response, and a thrown Server Action error has its message replaced in production by React's #441. That was survivable while the only 400s were the UGA-email rule (which the form pre-empts on the client) and a malformed LinkedIn URL.
-
-Once every field validates, it is not: a phone number with too few digits, a graduation that is not a semester and a year, a date of birth in the future and a name made of spaces are all failures the member has to read to fix. `lib/portal-api.js` now returns `{ error }` so they arrive as the API's own message.
-:::
-
----
+Expected profile errors return structured results from the Server Action and can identify the field. See [Profile validation](../api/endpoints.md#put-usersmeprofile).
 
 ## Member Directory
 
-:::note LinkedIn buttons (2026-08-05)
-Members with a LinkedIn URL get a link under their name in the directory profile modal and on their card on the public `/members-list` roster (where `ProfileCard` already had a LinkedIn slot that nothing was filling). It used to sit on the directory row as well; the card grid that replaced those rows carries only the fields listed below, so the modal is now the one place it appears inside the portal.
+`MemberDirectory.jsx` is shared by portal directory pages. It loads member information, supports group tabs, and opens a profile modal.
 
-`linkedin_url` was added to `memberModel`'s `findAll`, `findById` and `findPublicRoster` projections — it had been stored since the beginning but selected by none of them.
+LinkedIn URLs are validated on write and through `linkedinHref()` before rendering. Public links are part of the intended roster projection, while private contact/profile fields remain excluded.
 
-**It is the first profile field to become an `href`**, which is why it arrived with validation on both sides: `services/urls.js` in the API (see [API: Input validation](../api/overview.md#input-validation)) and `linkedinHref()` in `lib/portal-format.js` at render. A value that fails either rule renders no button rather than a broken or hostile link.
+### Group tabs and cards {#a-tab-bar-over-a-grid-of-profile-cards-2026-08-11}
 
-On the public roster this is the only contact-ish field — still no email, phone, major or pledge class. A LinkedIn profile is already a public professional page, and that roster exists to be found.
-:::
+`MEMBER_GROUP_ORDER` defines Eboard, Chairs, Members, Pledges, Alumni, and Rushees. Empty groups have no tab. `chosenGroup` is a preference; the displayed group falls back to an existing tab if data changes.
 
-`/member/directory`, `/pledge/directory` and `/admin/directory` list chapter members (name, `@username`, major, pledge class, and a role line for eboard and chairs). All three are the same `components/portal/MemberDirectory.jsx`; only the title, blurb and accent differ.
-
-### A tab bar over a grid of profile cards (2026-08-11)
-
-The directory used to be one scrolling table with a heading rule between each group. It is now a tab bar, one tab per group in `MEMBER_GROUP_ORDER` (**E-Board, Chairs, Members, Pledges, Alumni, Rushees**), over a responsive grid of profile cards. Same data, same profile modal on click.
-
-Three things fall out of the tabs:
-
-- **A group with nobody in it gets no tab.** This is what replaced the rush-count check that used to gate the old sidebar entry: out of season, or for a viewer the API withholds rushees from, the rush half of the fetch is empty and the tab isn't drawn. No permission branch in the component, and none needed.
-- **The count line under the grid follows the open tab.** It reads "N rushees signed up" on the rush tab and "N of M members in chapter" everywhere else. That total excludes rushees deliberately: they now arrive in the same fetch, so a plain `members.length` would quietly report a bigger chapter than there is. With a search term on screen it reads "N of M matching …" instead, because the number under a list should be the length of the list above it.
-- **The active tab is derived, not stored.** `chosenGroup` is only a preference; the tab actually rendered is the first one that still exists. A chapter that loses its last rushee mid-session falls back rather than staring at a tab that isn't there.
+Counts follow the visible group and search. Chapter-member totals exclude rushees.
 
 #### The card
 
-A card carries the photo, the name, `@username`, major, pledge class, and the exec title or chaired committees, and **deliberately no group badge** — the tab you are on already says the group, and repeating it on all 61 cards is noise. The modal still shows one.
+Cards show a name and available photo, username, major, pledge class, and role information. Missing optional fields are omitted. The group tab supplies context without repeating the same group badge on every card.
 
-Every field except the name can be null, and on the Rushees tab the pledge class is null for **everyone**, so that whole tab renders the sparse variant. Each block is conditional and the card is centred, which is what lets a photo-and-name-only card still look composed rather than broken. There are no dash placeholders on a card; those belong to table cells.
-
-The role line is coloured by the **portal accent**, not the member group's colour. Only around 14 of ~94 people have a role at all, so colouring it by group would put a second group marker on exactly the cards that least need one.
-
-Members who have never uploaded a photo get **initials on a gradient seeded from their id** (`lib/seed.js`, the same djb2 helper behind the empty-album covers). A tab of 60 rushees is mostly initials, and one accent colour for all of them is 60 identical circles with nothing to catch the eye on. The seed is the id, so a member's tile is the same colour on the card and in the modal it opens, on every device and every reload.
+Initials use a deterministic gradient from `lib/seed.js` so the same profile has a consistent appearance. Role text uses the portal accent.
 
 #### Group colours that survive dark mode
 
-The six `GROUP_COLOR` swatches were picked to sit on a white card: dark and saturated, which is exactly wrong on a dark one. The first tab bar ducked that by keeping every label on `text-foreground` and letting the colour appear only in a 2px underline, so group identity barely read at all.
-
-`readableGroupText(hex, dark)` keeps the hue, which is the identity, and re-derives only the lightness for the theme on screen: light mode holds the swatch near 34% L with a saturation floor, dark mode lifts it to 70% and pulls saturation back so a bright hue on near-black doesn't vibrate. Deriving beats a second hardcoded palette — a group added to `GROUP_COLOR` gets its dark variant for free, and the two can't drift. The same function now colours the group badge in the profile modal, which had the identical problem.
-
-Structurally, **every tab carries a solid dot in its group's hue whether it is selected or not.** Colouring only the active tab leaves five of the six unlabelled at any moment.
+`readableGroupText(hex, dark)` adjusts lightness and saturation for the current theme while retaining group hue. Tabs include a colored dot even when inactive; profile group badges use the same color treatment.
 
 #### Search, sort, and the phone
 
-**Search** filters within the open tab, on name and `@username`. It exists for the Rushees tab, where 60+ cards is past the point where scanning works. The tabs are built from the unfiltered groups, so searching can never make a tab vanish underneath the person typing.
+Search filters names and usernames within the active tab. Tabs are derived from unfiltered data so typing does not remove navigation. Sorting uses last name in either direction.
 
-**Sort** is still the one control it always was: last name, ascending or descending.
+On narrow screens, tabs use scrolling, snap points, edge fades, and chevrons. Fades use the panel's card color.
 
-Six tabs with counts do not fit a phone, and the first version was a bare horizontally scrolling row with no sign that anything lay past the right edge. It now has scroll-snap, a fade on whichever side has more to show, and a chevron button that appears and disappears with it. The fades resolve to `card`, not `background`: the tab bar sits inside the directory panel, and fading to the page colour would draw a pale block across it.
+`getMemberDirectoryWithRushees` combines the ordinary member list and a separate rushee request. If the rush request fails, the ordinary directory can still render; framework redirects must propagate.
 
-:::note The directory makes two API calls, not one
-`/members` deliberately omits rushees (see [Rush portal](./rush-portal.md#rushees-in-the-member-directory)), so a directory that wants a Rushees tab has to ask for them separately. `getMemberDirectoryWithRushees` in `lib/portal-api.js` fires both and concatenates, so the browser still makes one round trip.
+The profile modal offers eligible actions:
 
-The rush half is allowed to fail and returns `[]`. The API already answers `[]` rather than 403 for a caller who may not see rushees, so a rejection there means a real backend problem — and that should cost the Rushees tab, not the whole directory. A `NEXT_REDIRECT` still propagates, or the page renders that string instead of navigating.
-:::
+| Action | Behavior |
+| --- | --- |
+| Email | Shows available addresses and opens a mail link |
+| Message | Opens the current portal's DM path |
+| Meeting | Opens the meeting form where allowed |
+| Report | Files a profile report |
+| Block | Applies the caller's block |
 
-Clicking any member opens a **profile view** — a modal with their photo, group, major, pledge class, graduation date, and email, plus:
+Report and Block are hidden on the caller's own profile.
 
-- **Email** — a `mailto:` link, if they have an email on file. Members carry two addresses, **UGA Email** and **Personal Email**; both rows render when both exist, and the button prefers the UGA one
-
-:::note Alumni have no UGA email
-A UGA address stops working at graduation, so alumni don't have one anywhere in the product: the profile form doesn't offer the field (their remaining input is labelled just **Email**), and the API returns `email: null` for them, so the directory shows one address and the button targets it.
-
-Withholding it is a **correctness** fix, not a privacy one. The mailto prefers `email` over `personal_email`, so a stale UGA address left in the payload would silently send mail to a dead inbox.
-
-It's enforced in `memberModel`'s SQL rather than in the component, for the same reason the rushee rules are — filtering a payload client-side is a display choice, not a boundary, and a component-level check would miss the iOS app entirely.
-
-The stored value isn't deleted; it's masked at read time, so an alumnus who was mis-grouped and later corrected still has their address. The matching write-side guard is `preserveEmail` in `userModel.updateProfile`: `PUT /users/me/profile` is a whole-row upsert where absent keys become `NULL`, so without it an alumnus editing their bio would erase the address on file. See [API: `GET /members`](../api/endpoints.md#get-membersid).
-
-The rule keys off the resolved `member_group`, never the raw `groups` array — Authentik doesn't drop someone's old group when they graduate.
-:::
-- **Message** — jumps straight into a direct-message conversation with them, in whichever portal you're currently in (`/member/messages?with=<id>`, `/pledge/messages?with=<id>`, etc. — the target portal is derived from the current URL, not hardcoded, so this works the same from any portal that has a Directory)
-- **Request a meeting** — proposes a time through the [meetings](./meetings.md) flow; they accept or decline
-- **Report** — flags the profile itself to eboard's review queue (see [Safety & Moderation](./overview.md#safety--moderation))
-- **Block** — stops them from messaging you and hides their messages from your own view, self-service, no eboard approval needed. It's the small button immediately beside Report at the top-left of the profile card (it used to be a full-width button at the bottom), and the same pairing appears on any of their messages and photos
-
-The last two aren't shown on your own profile.
-
----
+For alumni, directory SQL masks the stored UGA-email field and uses personal email. The stored UGA value is retained for administrative correction. This is keyed to resolved `member_group`, not merely the presence of `alumni` among raw token groups.
 
 ## Admin: User Management
 
-`/admin/users` (eboard only) shows real member data — search, group filter, profile-complete filter, refresh button. Two things are editable inline on each row:
+`/admin/users` supports search, role and profile-completion filters, and refresh. A search spans groups and renders results together rather than hiding matches behind the active group tab.
 
-- **Group** — picking a new value calls Authentik directly to move them there, then mirrors it immediately, with no waiting for their next login. See [Operations: Changing a Member's Group](../operations/member-management.md#changing-a-members-group).
-- **Exec role** — a picker over the rows in [`exec_roles`](../api/overview.md#exec_roles-table), shown only on eboard members. It makes no Authentik call. Choosing a role writes both the role id and its label onto the member; choosing "No exec role" clears both.
+Inline controls change:
 
-**The search box sits above the stat cards, and a query searches every group at once.** Both are deliberate. It used to sit below four stat cards, near the fold on a laptop, and results were bucketed by group and shown one tab at a time — so searching for an alumnus while the Eboard tab happened to be open returned nothing, which reads as "search is broken" rather than "wrong tab". While a query is active the tabs are hidden and results render as one flat list; each card already carries a group badge, so nothing is lost.
+- **Group:** Authentik first, then stored application role. Existing token claims may remain older until refreshed.
+- **Exec role:** application role ID and copied label, without an Authentik call.
 
 ### Exec roles
 
-The picker is fed by one `GET /admin/exec-roles?includeInactive=1` for the whole page. **Retired roles are filtered out of each picker except on the member who holds one** — hiding a role while somebody still holds it must not make it vanish from their card, or the select would render as "No exec role" on a person who plainly has one and the next save would clear a position they hold.
+Load `GET /admin/exec-roles?includeInactive=1` once for the page. Retired roles stay visible for their current holders but are omitted from new-assignment choices.
 
-An **Exec roles** button in the page header opens the manager: add a position, rename one, reorder with the arrows, retire one, delete one. It is a modal on this page rather than a nineteenth sidebar entry — the list is eight rows touched a few times a year, and this is the page where roles are actually handed out.
+The manager can create, rename, reorder, retire, and delete roles. Renaming updates holders' copied titles. Deleting an assigned role returns `409`; retiring retains assignments. Slugs are stable and not editable.
 
-Three behaviours are worth knowing before editing this screen:
+UI holder counts derive from the loaded users. Unmatched legacy `exec_title` text appears as a disabled "Typed as" option until a stored role is selected.
 
-- **Renaming updates everyone holding the role**, because `users.exec_title` is a copy of the label. The API does it in the same call; the modal mirrors it into the open list so the cards behind it do not keep showing last year's title until a refresh.
-- **Deleting is refused while anyone holds the role**, and the API's message names the count. Retiring is the intended alternative and keeps the record of who held it.
-- **The slug is shown but never editable.** It is the stable key a future permission check gets written against, derived from the label once at creation. Renaming changes what people read and nothing else.
-
-Holder counts on that screen are **counted from the loaded user list**, not carried from the roles response. Both are the same population (`deleted_at IS NULL`), so it is exactly what the API computes, and deriving it means assigning a role updates the count with no bookkeeping to get wrong.
-
-Anything the exec-roles migration could not match to a row is still free text in `exec_title`. The picker shows it, greyed, as *Typed as "..."* — choosing a role overwrites it, so the picker is also the fix.
-
-There is still **no way to remove or deactivate a user from this page** — member removal remains an Authentik-side operation (see [Member Management](../operations/member-management.md)), not something the website UI does.
+Account removal remains an Authentik operation; the page does not deactivate or delete login accounts.
 
 ### Editing someone else's profile
 
-Each row has an **Edit** button opening a modal that can change everything on that person's profile: names, date of birth, major, graduation, both emails, phone, pledge class, LinkedIn, About Me, their username, and their profile picture (replace or remove). The chapter is a private organisation running its own directory, so correcting a member's profile text is ordinary housekeeping — mostly fixing what people typed in the wrong box, and removing the occasional thing that doesn't belong there.
+`AdminEditProfileModal` edits the selected user's fields rather than using the editor's session role to choose inputs.
 
-Three parts of the design are deliberate:
+- Username has its own save action.
+- Pictures upload on selection; removal clears the profile reference while retaining the asset for review.
+- Deleted/anonymized accounts return `404`.
+- All profile fields must be retained because this route replaces the row's editable fields.
+- UGA Email remains visible to the administrator even for alumni.
+- Profile changes are recorded in the activity log.
 
-- **Username saves on its own button**, separate from the rest of the form. It's the only field that writes to Authentik, and the only one that can fail with something specific ("that name is already taken") that would otherwise be buried inside an unrelated bio edit.
-- **Profile pictures upload on select**, with no separate save step, exactly like the member's own picture field. Same 25MB cap and same server-side re-encode. The stored Immich asset is kept even after a removal, so a contested takedown can still be reviewed.
-- **Anonymized accounts are not editable.** Anyone who used "delete my account" had their PII erased on purpose, and the API returns `404` rather than let an edit write names back into that row.
-
-:::note This is the most powerful write in the app
-It changes what a person's own profile says about them, under their name, with no notification to them. Every one of the three routes is recorded in the [activity log](./activity-log.md) automatically — by the global middleware, not by anything the controller remembers to call. If you're wondering who changed someone's bio, that's where it is.
-:::
-
-The modal is **not** a reuse of the shared `ProfileForm`. That component decides which fields to show by reading the *session* — `isRushee` and `isAlumni` describe whoever is logged in, which here is the eboard member, not the person being edited. It would show the wrong field set and post to the wrong route. The two share what actually matters instead: `buildProfilePayload`, so both send identical bodies, and the API's `services/profileFields.js`, so both are validated by identical rules.
-
-One field differs on purpose: **UGA Email is shown here even for alumni**, though alumni don't see it on their own form and it's masked in the directory. This is the surface for fixing bad stored data, so it shows what's really in the row.
+The modal shares payload construction and validation with the member form, not its session-dependent presentation. See [Admin profile updates](../api/endpoints.md#put-adminusersauthentikidprofile).
