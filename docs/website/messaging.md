@@ -112,7 +112,12 @@ The report join must include `content_type = 'group_message'` and compare `gcm.i
 
 - One attachment up to 25 MB. Text, a file, or both are allowed. Images go to Immich; other attachments use API disk storage.
 - Replies to a message in the same conversation or chat.
-- Reactions that toggle when the same value is sent again.
+- Reactions that toggle when the same value is sent again. A row of eight
+  quick emoji, with a plus that opens a searchable directory of roughly 350
+  covering eight categories, with recently used remembered per browser. The
+  API accepts one emoji and refuses anything else.
+- An emoji button in the composer, opening the same directory and inserting
+  at the cursor rather than at the end of the message.
 - Deletion by the sender, plus the applicable moderation rules.
 
 Sends are limited to 20 per minute per user. The earlier profanity-filter module is no longer present in the current API.

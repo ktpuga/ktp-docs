@@ -1267,7 +1267,15 @@ Streams an attachment to its sender or recipient.
 
 ### `POST /messages/:messageId/reactions`
 
-Accepts `{ "emoji": "" }`. Sending the same emoji again removes the reaction.
+Accepts `{ "emoji": "👍" }`. Sending the same emoji again removes the reaction.
+
+**The value must be exactly one emoji** (since 2026-09-06). Anything else is
+`400 {"message": "A reaction must be a single emoji"}`. One emoji means one
+grapheme cluster, so multi-codepoint sequences count as one: skin-tone
+modifiers, flags, keycaps and zero-width-joiner sequences such as a family
+emoji are all accepted. Plain text, two emoji, or an emoji with text attached
+are refused. Removing a reaction is never blocked, even for a value stored
+before the rule existed.
 
 ### `DELETE /messages/:messageId`
 
@@ -1333,7 +1341,8 @@ Streams the attachment to a chat member.
 
 ### `POST /group-chats/:id/messages/:messageId/reactions`
 
-Chat members can toggle a reaction with `{ "emoji": "" }`.
+Chat members can toggle a reaction with `{ "emoji": "👍" }`. The same
+one-emoji rule as DM reactions applies, with the same `400`.
 
 ### `DELETE /group-chats/:id/messages/:messageId`
 
