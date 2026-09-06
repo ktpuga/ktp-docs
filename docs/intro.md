@@ -3,11 +3,11 @@
 This site is the official living knowledge base for the **Phi Chapter of Kappa Theta Pi**.
 It contains everything needed to maintain, improve, and scale our technical, operational, and organizational infrastructure.
 
-If you're a member of **Tech Team**, **Infrastructure**, **Exec**, or a contributor working on Kronos, the KTP website, or internal tools — this is where your documentation goes 😸
+If you're a member of **Tech Team**, **Infrastructure**, **Exec**, or a contributor working on Kronos, the KTP website, or internal tools — this is where your documentation goes 
 
 ---
 
-## 🧭 **Purpose of This Documentation**
+## **Purpose of This Documentation**
 
 Our chapter builds and maintains a _lot_ of systems:
 
@@ -27,7 +27,7 @@ This portal keeps all of that information:
 
 ---
 
-## 📚 **How to Add Your Documentation**
+## **How to Add Your Documentation**
 
 Every member should contribute. It’s simple:
 
@@ -60,7 +60,7 @@ Your additions appear at **[https://docs.ugaktp.com](https://docs.ugaktp.com)** 
 
 ---
 
-## ✍️ **Markdown Template Example (Copy/Paste This)**
+## **Markdown Template Example (Copy/Paste This)**
 
 Use this as a starter for any new documentation page:
 
@@ -98,7 +98,7 @@ description: <1–2 sentence summary>
 
 ---
 
-## 💡 **Tips for Writing Good Documentation**
+## **Tips for Writing Good Documentation**
 
 - Be specific.
 - No AI Slop.

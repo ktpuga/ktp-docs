@@ -12,7 +12,7 @@ description: The **primairy** role of the VP of Technical Development is to enha
 
 ---
 
-## 🔬 The Ogle Research Lab
+## The Ogle Research Lab
 
 The VP of Technical Development is also responsible for collaborating with the **Research Lab Chair** to ensure and guide the growth and success of the Ogle Research Lab. This lab is dedicated to providing a welcoming, collaborative enviornment to give our brothers **experience in contributing to and eventually publishing cutting-edge, novel CS research**.
 
@@ -20,7 +20,7 @@ Our current focus is on **anti-hallucination techniques for LLMs** levaraging Re
 
 ---
 
-## 📝 Tips for Incoming VPs
+## Tips for Incoming VPs
 
 - Don't rely on brothers to proactively suggest workshop topics, interest surveys help, but ultiamtely, **you will set the tone**. Choose topics that you are passionate about and that provide strong career value.
 - Think in terms of **impact**: workshops that help people ship real tools, build portfolio projects, or understand modern industry workflows always land well.

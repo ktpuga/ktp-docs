@@ -11,7 +11,7 @@ The Exec Board oversees all internal operations, member development, organizatio
 
 ---
 
-## 📘 **Founding Executive Board**
+## **Founding Executive Board**
 
 According to the _KTP Phi Chapter Constitution, Section 2: Founding Class_, the original Executive Board consisted of the following leaders:
 
@@ -32,7 +32,7 @@ These individuals established the structure, culture, and operational framework 
 
 ---
 
-## 🧭 **Purpose of the Executive Board**
+## **Purpose of the Executive Board**
 
 The Executive Board exists to:
 
@@ -47,7 +47,7 @@ Each Vice President has a defined domain of responsibility, but collaboration ac
 
 ---
 
-## 🌱 **A Living Framework**
+## **A Living Framework**
 
 As the chapter grows, the responsibilities, processes, and structure of the Executive Board continue to evolve.
 This documentation section outlines:

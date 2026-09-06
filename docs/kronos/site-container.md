@@ -40,7 +40,7 @@ The site container follows similar deployment patterns to the docs container, le
 
 The site is publicly accessible at:
 
-### **➡️ [https://ugaktp.com](https://ugaktp.com)**
+### **[https://ugaktp.com](https://ugaktp.com)**
 
 For administrative access, connect through Proxmox management interface at [https://proxmox.ugaktp.com](https://proxmox.ugaktp.com).
 

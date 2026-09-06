@@ -17,6 +17,6 @@ This is markdown. If you want to get into details of something specific for your
 
 ---
 
-## 📝 Tips for Incoming VPs
+## Tips for Incoming VPs
 
 - All these bullet points should be from-the-heart, and NOT AI generated. It is ok to brain storm but do not just copy and paste pls

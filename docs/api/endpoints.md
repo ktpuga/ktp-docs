@@ -1267,7 +1267,7 @@ Streams an attachment to its sender or recipient.
 
 ### `POST /messages/:messageId/reactions`
 
-Accepts `{ "emoji": "👍" }`. Sending the same emoji again removes the reaction.
+Accepts `{ "emoji": "" }`. Sending the same emoji again removes the reaction.
 
 ### `DELETE /messages/:messageId`
 
@@ -1333,7 +1333,7 @@ Streams the attachment to a chat member.
 
 ### `POST /group-chats/:id/messages/:messageId/reactions`
 
-Chat members can toggle a reaction with `{ "emoji": "👍" }`.
+Chat members can toggle a reaction with `{ "emoji": "" }`.
 
 ### `DELETE /group-chats/:id/messages/:messageId`
 

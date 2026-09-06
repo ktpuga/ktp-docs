@@ -11,7 +11,7 @@ This page provides a full overview of Kronos. Mainly: its purpose, capabilities,
 
 ---
 
-## 🖥️ What is Kronos?
+## What is Kronos?
 
 **Kronos** is a rack-mounted, enterprise-grade Linux server hosted in the **Cyber Wurx** data center in Atlanta, running:
 
@@ -25,11 +25,11 @@ This is not a rented VPS. It's _real hardware_ owned, configured, secured, and m
 
 ---
 
-## 🌐 Accessing Kronos
+## Accessing Kronos
 
 All infrastructure management is performed through our Proxmox interface:
 
-### **➡️ [https://proxmox.ugaktp.com](https://proxmox.ugaktp.com)**
+### **[https://proxmox.ugaktp.com](https://proxmox.ugaktp.com)**
 
 This authenticated management portal gives authorized engineers access to:
 
@@ -44,7 +44,7 @@ Access is restricted to authorized Tech + Infrastructure members.
 
 ---
 
-## 🏗️ Current Infrastructure Layout
+## Current Infrastructure Layout
 
 Below is the **current (live) VM and container layout** as deployed on Kronos.
 
@@ -68,7 +68,7 @@ VE: Datacenter
 | 106 | dokploy   | LXC Container | Deployment engine for internal + external apps (this site, etc.)                  |
 | 110 | Site      | LXC Container | Hosts ugaktp.com (KtpGeorgia.com's same repo)                                     |
 
-## 🚀 Why Kronos Exists
+## Why Kronos Exists
 
 Kappa Theta Pi is a fraternity built on innovation, engineering, and real-world impact.
 Kronos gives our members _true infrastructure experience_ that cannot be simulated in classroom environments.
@@ -106,7 +106,7 @@ Every VM, script, and service becomes part of a growing system future members in
 
 ---
 
-## 🛡️ Security Philosophy
+## Security Philosophy
 
 Kronos operates under strict, production-grade security principles:
 
@@ -123,7 +123,7 @@ Access is limited to Infrastructure Team members.
 
 ---
 
-## 👥 Founding Infrastructure Team
+## Founding Infrastructure Team
 
 ![Picture of us holding the server](./img/server1.jpg)
 **Class years listed as of the commissioning of Kronos:**
@@ -139,7 +139,7 @@ This team physically installed, configured, secured, and delivered Kronos to Cyb
 
 ---
 
-## 📸 Commissioning Ceremony
+## Commissioning Ceremony
 
 Kronos was officially commissioned on **September 30, 2025**, and ceremonially signed by the founding team before entering production in Atlanta.
 
@@ -147,7 +147,7 @@ _(Images provided above.)_
 
 ---
 
-## 🌐 Vision for the Future
+## Vision for the Future
 
 Planned expansions include:
 
@@ -164,7 +164,7 @@ Kronos is a living system (grows with the Chapter)
 
 ---
 
-## 🏁 Final Note
+## Final Note
 
 Kronos is more than hardware.
 It’s a symbol of what student engineers can accomplish when they’re given a challenge, freedom, and responsibility.

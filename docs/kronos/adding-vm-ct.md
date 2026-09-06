@@ -88,7 +88,7 @@ If the service has known requirements (databases, media processing, CI runners),
 - **No network access:** Verify IP, gateway, and DNS in the container/VM config.
 - **Port conflicts:** Confirm Traefik routing and exposed ports.
 - **Storage full:** Resize disk in Proxmox and grow the filesystem in the guest.
-- ⚠️ **Traefik changes:** Be extremely cautious when editing `dynamic.yml`. A YAML error can break routing for everything, including `https://proxmox.ugaktp.com`, which may force a manual SSH fix.
+- **Traefik changes:** Be extremely cautious when editing `dynamic.yml`. A YAML error can break routing for everything, including `https://proxmox.ugaktp.com`, which may force a manual SSH fix.
 
 ## Additional Notes
 

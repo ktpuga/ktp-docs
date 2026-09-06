@@ -23,7 +23,7 @@ While delegation is important, you must be present at many rush/PNM events. This
 
 ---
 
-## 📝 Tips for Incoming Presidents
+## Tips for Incoming Presidents
 
 - Listen to your Executive Board. If they aren't doing things that you want, ask them! Talk to them and show them they are important. Leverage their leadership to make cohesive decisions.
 - Do not get walked over. If you lack seniority do not let that be a reason to be a yes-man, or conform to critique without considering your own perspectives and experience.
