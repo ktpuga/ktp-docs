@@ -1130,7 +1130,11 @@ Streams the file with `Content-Disposition: attachment` and its download filenam
 
 ### `GET /documents/:id/preview`
 
-Streams the same file with `Content-Disposition: inline` for the portal preview, including images and PDFs.
+Checks document visibility before reading the file. The API recognizes PDF, JPEG, PNG, GIF, and WebP signatures from stored bytes and serves those with their canonical content type and `Content-Disposition: inline`. It does not trust the uploaded MIME type or filename. Signature recognition is not a full file validation or malware scan.
+
+Other files, including HTML, SVG, Office documents, and unrecognized data, are served as `application/octet-stream` with `Content-Disposition: attachment`. This also applies to files uploaded before the preview fix.
+
+Every successful preview response sets `Content-Security-Policy: sandbox`, `X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`. The website proxy enforces these headers too and converts unsupported upstream content types to downloads, including during an API/website deployment mismatch.
 
 ### `POST /documents/link`
 
@@ -1156,7 +1160,7 @@ Rows have `kind: "file" | "link"`. A link has `url` set and no `mime_type`, `fil
 
 Invalid names return `400` before lookup. An inaccessible document returns `404`; a visible document that the caller cannot rename returns `403`.
 
-The endpoint does not require a file extension. Preview still uses `mime_type`, but downloaded files may be harder to open without an extension. The portal selects only the basename in its rename dialog to retain the extension by default.
+The endpoint does not require a file extension. The portal uses `mime_type` to choose its viewer, but the API decides whether inline serving is allowed from file bytes. Downloaded files may be harder to open without an extension. The portal selects only the basename in its rename dialog to retain the extension by default.
 
 ### `PATCH /documents/folders/:id`
 

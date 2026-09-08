@@ -41,7 +41,7 @@ Row actions also check ownership:
 
 Keep `DOCUMENT_CONTRIBUTOR_GROUPS` explicit on both sides. Extending read access must not automatically grant contribution rights.
 
-Images preview inline, PDFs use an embedded viewer, and unsupported preview formats offer download. Links open separately rather than passing through file preview.
+PDFs and JPEG, PNG, GIF, and WebP images can preview inline after the API recognizes their file signatures. HTML, SVG, Office documents, and unrecognized files download instead, even if they have a misleading filename or uploaded MIME type. Existing uploads follow the same rules. Preview responses use an enforced sandbox, `nosniff`, and private no-store caching; the website preserves these protections. This is not malware scanning. Links open separately rather than passing through file preview.
 
 ### Uploading a folder
 
@@ -79,7 +79,7 @@ The Move button remains available for keyboard and touch users. Drag actions mus
 
 One `RenameModal` handles folder `name` and document `filename`. Documents may be renamed by their uploader or a manager; folders require eboard/chair access.
 
-For files, select the basename while retaining the extension by default. `mime_type` determines preview behavior, but an extension helps downloaded files open in local applications. Renaming does not change `storage_path`.
+For files, select the basename while retaining the extension by default. The portal uses `mime_type` to choose a viewer, while the API checks stored bytes before allowing inline serving. An extension helps downloaded files open in local applications. Renaming does not change `storage_path`.
 
 ## Content visibility
 
