@@ -1621,7 +1621,7 @@ Returns `{ "email": true | false }` to indicate whether the deployment can send 
 
 `POST /announcements` and `POST /events` accept `send_email: true`. Each eligible recipient gets an individual email, excluding deleted accounts, test accounts, and users who disabled email.
 
-An atomic claim through `announcements.emailed_at` or `events.emailed_at` limits each item to one email send; edits do not resend it. Sending requires `RESEND_API_KEY` and `EMAIL_FROM`. Missing credentials produce a warning without preventing the underlying operation.
+An atomic claim through `announcements.emailed_at` or `events.emailed_at` limits each item to one email send; edits do not resend it. No mail transport is configured, so `send_email: true` is accepted and then skipped: the announcement or event is still created, and a warning is logged. The claim is checked after configuration, so an item is not marked emailed when nothing was sent.
 
 ---
 

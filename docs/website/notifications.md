@@ -129,6 +129,6 @@ A claimed send is not proof of successful delivery to every recipient.
 
 ### Setup
 
-Configure `RESEND_API_KEY` and `EMAIL_FROM` on the API server and verify the sending domain with the email provider. Missing configuration disables email without disabling the underlying post.
+No mail transport is configured on the API, so email is disabled and the compose checkbox is hidden. No environment variable enables it. Turning email on means implementing a transport in `services/emailService.js` on the API; the website needs no change, because it reads `GET /notifications/channels` at page load.
 
 The API checks configuration before claiming a send. This avoids marking a post emailed when email is unavailable, but does not imply that enabling email later automatically sends earlier posts.
