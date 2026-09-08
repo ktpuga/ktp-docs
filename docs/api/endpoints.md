@@ -1629,17 +1629,21 @@ An atomic claim through `announcements.emailed_at` or `events.emailed_at` limits
 
 These routes serve the authenticated iOS home screen. The public website gallery uses the separate Homepage Photos routes above.
 
-Reads require authentication; writes require eboard. A slide is visible when active and within its optional `starts_at` and `ends_at` schedule. Responses do not expose Immich asset IDs.
+Reads require authentication; writes require eboard. A slide is visible when active, within its optional `starts_at` and `ends_at` schedule, and targeted at the viewer's audience. Responses do not expose Immich asset IDs.
+
+**Audience:** responses include an `audience` array containing one or more of `active`, `alumni`, and `rush`. Members (`active`) includes active members, chairs, and eboard. Alumni and rushees match their respective roles. Pledges and accounts without a recognized role match no audience. Role priority is eboard, chair, active, alumni, pledge, then rush; a retained rush group does not grant access to a pledge.
+
+Apply migration `1790800000000_tighten-ios-slideshow-audience.sql` before deploying this API version. It follows `1790700000000_add-ios-homepage-slide-audience.sql`, preserves saved selections and the audience index, and defaults new rows to `active`. The earlier migration assigns all three audiences to slides that predate audience support. Earlier API revision `6fea0d2` ignores audience selections. See [the website controls](../website/photos-and-documents.md#ios-homepage-slideshow).
 
 ### `GET /ios-homepage-photos`
 
 Returns visible slides in display order as `{ "slides": [...] }`.
 
-Eboard can use `?include_hidden=true` to include inactive, scheduled, and expired slides for administration. Keep this opt-in and permission check: the iOS app uses the same endpoint without the flag.
+Eboard can use `?include_hidden=true` to include every audience and inactive, scheduled, and expired slides for administration. Keep this opt-in and permission check: the iOS app uses the same endpoint without the flag.
 
 ### `GET /ios-homepage-photos/:id/media`
 
-Streams a visible slide. Eboard can also fetch hidden slides. Supports `ETag` and `If-None-Match`.
+Streams a visible slide. Both `variant=ios_home_hero` (default) and `variant=original` check audience and schedule before fetching media or returning `304` for a matching `If-None-Match`. A nonmatching viewer receives `404` with `code: "slide_not_found"`. Eboard can preview every audience and hidden slides for administration. Responses use private, revalidated caching.
 
 ### `POST /ios-homepage-photos`
 
@@ -1647,13 +1651,15 @@ Streams a visible slide. Eboard can also fetch hidden slides. Supports `ETag` an
 
 Optional fields: `subtitle`, `link_url` (HTTPS only), `link_label`, `is_active` (defaults to true), `starts_at`, `ends_at`, `focal_x`, and `focal_y`.
 
+`audience` defaults to `["active"]` when omitted. Multipart uploads send it as a JSON-encoded array, such as `["active","alumni"]`. An empty array, unknown value, or malformed field returns `400` with `code: "invalid_audience"`. Duplicates are removed.
+
 ### `POST /ios-homepage-photos/register`
 
-**Eboard only.** Creates a slide from `immich_asset_id` with the same metadata as an upload.
+**Eboard only.** Creates a slide from `immich_asset_id` with the same metadata as an upload. JSON requests send `audience` as an array.
 
 ### `PUT /ios-homepage-photos/:id`
 
-**Eboard only.** Partially updates metadata.
+**Eboard only.** Partially updates metadata. Supplying `audience` replaces the saved selection; omitting it preserves the existing selection. Create, update, and list responses return the saved array.
 
 ### `PUT /ios-homepage-photos/:id/image`
 

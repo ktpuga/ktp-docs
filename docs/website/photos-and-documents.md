@@ -139,7 +139,21 @@ Collection deletion requires confirmation with the actual photo count. It remove
 
 The iOS App tab manages authenticated slideshow content through `/ios-homepage-photos`, separately from the public `/homepage-photos` gallery.
 
-Slides contain title, alt text, optional subtitle and HTTPS link, active state, and optional start/end times. Only active slides within their schedule appear.
+Slides contain title, alt text, optional subtitle and HTTPS link, active state, and optional start/end times. Only active slides within their schedule and matching the viewer's audience appear.
+
+The create and edit form has a required **Visible to** selector:
+
+| Option | Value sent to the API | Intended audience |
+| --- | --- | --- |
+| Members | `active` | Current members, including chairs and eboard |
+| Alumni | `alumni` | Alumni accounts |
+| Rushees | `rush` | Prospective-member accounts |
+
+New slides default to Members. At least one option must remain selected. Pledges have no matching audience, even if their account still has a rush group. The API uses the highest-priority role: eboard, chair, active, alumni, pledge, then rush. When a response has no audience array, the editor selects all three options; this is a client fallback, not evidence of a saved audience restriction.
+
+Uploads send `audience` as a JSON-encoded array in multipart data. Registering an existing asset sends the array in JSON. Metadata updates include `audience` when the selected set changes; changing only its order does not produce an update.
+
+**Deployment requirement:** apply API migration `1790800000000_tighten-ios-slideshow-audience.sql` and deploy the audience-supporting API before relying on these controls. Older API revision `6fea0d2` ignores the selector. The upstream migration gives older slides all three audiences. The follow-up preserves saved selections and defaults new slides to Members. The API saves and returns the selection and checks it on slide lists and both image variants. Eboard can inspect all slides in the manager. See [Slideshow endpoints](../api/endpoints.md#ios-homepage-slideshow).
 
 Limits: ten active slides, 100 MB per upload, JPEG/PNG/HEIC/HEIF/WebP, no animation, and source size at least 900 × 600. Processing crops around the focal point and produces a progressive JPEG. See [Slideshow endpoints](../api/endpoints.md#ios-homepage-slideshow).
 
