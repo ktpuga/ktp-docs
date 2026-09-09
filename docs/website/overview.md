@@ -105,6 +105,8 @@ Events can enable QR-code attendance:
 4. The website calls a Server Action, which sends the user's bearer token and attendance code to the API.
 5. The page displays success or the returned error. Organizers can also mark people present, excused, or absent manually.
 
+The officer QR display fetches a fresh code when opened. It uses API-provided durations and elapsed request time, so an incorrect officer computer clock does not set the refresh schedule. Failed refreshes hide the code and retry with delays up to ten seconds; the overlay also provides a retry button. Returning to the tab fetches a new code. Closing it stops its timers. An eight-second request watchdog hides the QR during a stall; the controller waits for the outstanding request to settle before sending another. Deploy the API timing fields before this website change.
+
 The event check-in window opens 30 minutes before the start and closes 30 minutes after the end. The HMAC code rotates every 10 seconds; the API accepts the current and previous periods. A particular code therefore has about 10 to 20 seconds of validity. A recent photo can still work within that interval.
 
 Authentication can fail before the attendance controller runs. An authenticated website session does not by itself prove that the API access token is valid. See [Sign-In Flow](./sign-in.md) for token refresh and session handling.

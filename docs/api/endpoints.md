@@ -368,9 +368,9 @@ Attendance permissions are defined by `MAY_MANAGE_ATTENDANCE` in `attendanceCont
 
 ### `GET /events/:id/attendance/code`
 
-**Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs }`. Encode a QR pointing to `<site>/checkin/:eventId/:code`.
+**Eboard, cabinet or event creator.** Returns `{ eventId, code, expiresAt, periodMs, refreshAfterMs, validForMs }`. Encode a QR pointing to `<site>/checkin/:eventId/:code`.
 
-Codes rotate every 10 seconds. Fetch a replacement just after `expiresAt`; use the response timing fields instead of hardcoding the interval. `AttendancePage.jsx` fetches a code when mounted and continues refreshing while the QR overlay is open.
+Codes rotate every 10 seconds. `refreshAfterMs` is the duration from generation until the next bucket. `validForMs` is the duration until the code stops validating, including the existing grace bucket; `expiresAt` remains the next bucket boundary. Responses use `Cache-Control: private, no-store`. Subtract request elapsed time before scheduling a refresh or display expiry. The website fetches only while the QR overlay is open, refreshes just after rotation, and hides a code before its validation deadline. Deploy these additive API fields before the website recovery change; the validation window is unchanged.
 
 Returns `400` if attendance is not enabled for the event.
 
@@ -499,7 +499,7 @@ Regular members can use the calendar to confirm their own status. The attendance
 
 Live events appear under Upcoming with a *Happening now* heading. The initial tab uses whichever group has events. Refreshing keeps the selected event unless it is no longer in the visible tab.
 
-**Show QR code** opens a fullscreen overlay, closed by its button or `Esc`. The overlay hides the roster so it is not projected with the QR.
+**Show QR code** opens a fullscreen overlay, closed by its button or `Esc`. The overlay hides the roster so it is not projected with the QR. It fetches a fresh code on opening. Refresh failures replace the QR with a reconnecting message and a retry button. Automatic retries back off to ten seconds; returning to the tab requests a fresh code. A separate expiry timer clears old codes even while another request is pending.
 
 **Finalize roster** and **Reopen roster** call `PUT /events/:id/attendance-finalized`. Finalized events show the date. Past events that remain open show a *Not finalized* indicator and explain that their rosters can still change.
 
