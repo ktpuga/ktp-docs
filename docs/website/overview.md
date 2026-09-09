@@ -113,7 +113,11 @@ Authentication can fail before the attendance controller runs. An authenticated 
 
 ### Scanning while signed out
 
-The check-in page sends an unauthenticated visitor to `/login?next=/checkin/…` and returns them after sign-in. The original attendance code may have expired during login, requiring another scan of the live QR code.
+The check-in page offers a sign-in link to visitors without a usable session. It preserves the scan through an allowlisted `next` path and returns there after sign-in. A session marked with a refresh error also takes this path, even if the client reports authenticated. The original attendance code may expire during login; in that case, scan the current QR on the screen.
+
+A different QR URL or account starts a separate attempt and clears the previous result, including when Next reuses the page. Late responses from an earlier scan cannot overwrite the current result. The page does not repeatedly submit a refused code or promise that another scan will succeed. Wait for confirmation; if scanning still fails, show the message and reference to an officer.
+
+The displayed result comes from the API roster status. Existing officer decisions of absent or excused remain visible, and an unrecognized response does not count as confirmation. These changes do not extend the code validity window.
 
 `lib/next-path.js` accepts only the supported `/checkin/<id>/<code>` return-path shape. Unsupported values fall back to normal portal routing. Add explicit patterns if another return destination is needed.
 

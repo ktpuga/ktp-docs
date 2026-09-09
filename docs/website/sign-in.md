@@ -125,6 +125,8 @@ The probe marker uses SameSite Lax and a 120-second lifetime so server-rendered 
 
 A failed probe does not establish that the person has no account; it means silent sign-in did not complete.
 
+`/login?error=SessionExpired` instead shows "Your session expired. Sign in again to continue." A leftover probe cookie does not hide this explanation. Other sign-in errors retain the existing failure message and probe handling.
+
 ## The things that would loop
 
 Auto-start is suppressed for:
@@ -154,6 +156,7 @@ A completed sign-in clears `token.error`. Otherwise proxy handling of an old err
 | Healthy website session | Account chooser |
 | Probe did not complete sign-in | SSO button and rush information |
 | Manual sign-in failed | Sign-in controls with an error banner |
+| Session expired | Sign-in controls with a session-expiry explanation |
 | Just signed out | Confirmation and manual controls |
 | Account switch | Interactive sign-in |
 
