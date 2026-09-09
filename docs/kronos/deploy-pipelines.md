@@ -59,6 +59,24 @@ record a revision that never became healthy, and the next scheduled run would
 then skip it as already deployed, leaving the broken build in place until
 somebody noticed. A failed deploy has to stay retryable.
 
+### Website container hostname mappings
+
+The website Compose service maps `auth.ugaktp.com` and `ugaktp.com` to the internal Traefik address `10.0.0.2` using `extra_hosts`. These mappings apply inside the website container; they do not change public DNS. HTTPS still uses the original hostname and validates its certificate.
+
+The website's public IP refused connections from inside its Docker container, while the internal proxy route returned HTTP 200. Next.js can fetch a same-site destination while processing a Server Action redirect, so the website mapping gives those requests a working internal route. Next.js also has a normal redirect fallback; a failed server-side fetch does not prove that the browser could not navigate. This correction does not by itself fix session renewal or expired attendance QR codes.
+
+Deploy changes to `extra_hosts` through the website workflow so Compose recreates the container. A restart alone does not apply the new configuration. If the internal proxy moves, update both hostname mappings.
+
+After deployment, run from website LXC 116:
+
+```bash
+docker inspect --format '{{json .HostConfig.ExtraHosts}}' uga-ktp-website-web-1
+docker exec uga-ktp-website-web-1 node -e 'require("node:dns").lookup("ugaktp.com", (error, address) => { if (error) { console.error(error.code); process.exitCode = 1; } else console.log(address); });'
+docker exec uga-ktp-website-web-1 node -e 'fetch("https://ugaktp.com/login", { redirect: "manual", signal: AbortSignal.timeout(10000) }).then(async response => { console.log("HTTP", response.status); await response.body?.cancel(); }).catch(error => { console.error(error.cause?.code || error.message); process.exitCode = 1; });'
+```
+
+Expect both mappings, address `10.0.0.2`, and HTTP 200 for the login page. Do not force an address or disable certificate verification in this check. The deployment health gate tests the published application port, so it does not cover this hostname route. To roll back the website mapping, remove only the `ugaktp.com` entry and redeploy; preserve the existing Authentik entry.
+
 ### Push deployment is off by default
 
 `vars.DEPLOY_ON_PUSH` is a repository variable, currently **unset**, so pushes
