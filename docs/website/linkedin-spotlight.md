@@ -45,7 +45,7 @@ Edits remove the ID from the seen set before reprocessing the changed message, s
 
 `lib/spotlight-posts.js` fetches server-side with a three-second timeout and ten-minute revalidation. A fetch failure uses `FALLBACK_SPOTLIGHT_LINKS` from `app/spotlight/links.js`.
 
-The fallback contains the original seeded posts and is not the normal publishing path. Add new posts through Discord. An API response with an empty list stays empty; it must not restore posts an officer hid.
+The fallback contains the original seeded posts and is not the normal publishing path. Add new posts through Discord. An API response with an empty list stays empty; it must not restore posts an executive board member hid.
 
 `rotateHourly(links, count, now)` advances the starting offset each hour for both API results and fallback lists.
 

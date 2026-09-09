@@ -414,7 +414,7 @@ Chairs and eboard count as active members. `syncRoster` handles this with a SQL 
 
 This boolean reports whether the attendee currently matches the event's audience. It becomes false if they change to an ineligible group, leave the relevant committee, or delete their account. It uses the same `AUDIENCE_MATCH_SQL` as roster syncing.
 
-Use this flag for display, not to remove records. On an open roster, the portal greys out these rows and labels them *no longer in this group* or *account deleted*. Officers can still change the status of an existing account, and an audience mismatch does not refuse self check-in.
+Use this flag for display, not to remove records. On an open roster, the portal greys out these rows and labels them *no longer in this group* or *account deleted*. Executive board members can still change the status of an existing account, and an audience mismatch does not refuse self check-in.
 
 Do not grey out a finalized roster based on current eligibility. Its saved membership describes the event at the time it was finalized. The API still returns `still_eligible`; `AttendancePage` uses `finalizedAt` to decide whether to apply the styling.
 
@@ -462,16 +462,16 @@ Check-in opens 30 minutes before the event starts and closes 30 minutes after it
 
 The controller checks audience eligibility for its logs but records the scan even when the attendee does not match. Empty or stale groups do not themselves cause a refusal. Eligibility queries can still fail with a database error.
 
-#### Repeat scans and officer marks
+#### Repeat scans and executive board member marks {#repeat-scans-and-officer-marks}
 
 A repeat scan preserves the first `checked_in_at` time. It also preserves `status` and `marked_by` when either:
 
-- `marked_by IS NOT NULL`, indicating an officer's mark.
+- `marked_by IS NOT NULL`, indicating a manual mark.
 - The existing status is `excused` or `absent`.
 
-The status check is needed because deleting an officer sets `marked_by` to null. Their previous absent or excused marks must still be preserved.
+The status check is needed because deleting an executive board member sets `marked_by` to null. Their previous absent or excused marks must still be preserved.
 
-A member already marked absent or excused stays that way after scanning until an officer changes the status. The request returns the existing record successfully, so clients must read `record.status` instead of assuming every `200` means present.
+A member already marked absent or excused stays that way after scanning until an executive board member changes the status. The request returns the existing record successfully, so clients must read `record.status` instead of assuming every `200` means present.
 
 The SQL upsert uses `CASE` expressions to preserve marks while still returning the row. A conditional update that returned no row would be treated by `selfCheckIn` as a failed write.
 
@@ -489,7 +489,7 @@ Each event includes the caller's recorded status: `"present"`, `"excused"`, `"ab
 
 The field is specific to the caller. It is not part of `eventModel.toCalendarEventJSON` and is not included in `GET /events/:id` or the ICS feed.
 
-`EventsCalendar.jsx` displays *Checked in*, *Excused*, or *Marked absent*. When no status is recorded, it shows the plain *Attendance* badge. Keep these labels separate from the officer roster's *Present* and *Absent* labels.
+`EventsCalendar.jsx` displays *Checked in*, *Excused*, or *Marked absent*. When no status is recorded, it shows the plain *Attendance* badge. Keep these labels separate from the attendance management screen's *Present* and *Absent* labels.
 
 Regular members can use the calendar to confirm their own status. The attendance management screen is shown to chairs and eboard.
 

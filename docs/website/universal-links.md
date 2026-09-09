@@ -56,7 +56,7 @@ applinks:ugaktp.com
 applinks:ktpgeorgia.com
 ```
 
-Both hosts matter because the officer's current website origin determines the QR host. The app identifier and provisioning must support Associated Domains. Verify the complete Camera-to-app flow on a physical device.
+Both hosts matter because the executive board member's current website origin determines the QR host. The app identifier and provisioning must support Associated Domains. Verify the complete Camera-to-app flow on a physical device.
 
 ## Handling in the app
 

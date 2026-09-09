@@ -185,7 +185,7 @@ The chooser does not independently compare the Authentik account with the websit
 
 ## Attendance refresh and cookie persistence
 
-Check-in and officer QR-code Server Actions use server-only `getActionAccessToken`. It invokes Auth.js's writable session update, persists replacement cookies including chunked sessions, and reads the bearer from the updated cookie jar. The JWT callback owns refresh and deduplication; access and refresh tokens are not exposed in browser session JSON.
+The check-in Server Action and the QR-code Server Action for executive board members use server-only `getActionAccessToken`. It invokes Auth.js's writable session update, persists replacement cookies including chunked sessions, and reads the bearer from the updated cookie jar. The JWT callback owns refresh and deduplication; access and refresh tokens are not exposed in browser session JSON.
 
 This fixes a reproduced mismatch where `auth()` refreshed internally but a later `getToken` read the old bearer from incoming headers. The installed no-argument `auth()` path did not forward its internal Set-Cookie response.
 

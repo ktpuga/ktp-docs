@@ -105,7 +105,7 @@ Events can enable QR-code attendance:
 4. The website calls a Server Action, which sends the user's bearer token and attendance code to the API.
 5. The page displays success or the returned error. Organizers can also mark people present, excused, or absent manually.
 
-The officer QR display fetches a fresh code when opened. It uses API-provided durations and elapsed request time, so an incorrect officer computer clock does not set the refresh schedule. Failed refreshes hide the code and retry with delays up to ten seconds; the overlay also provides a retry button. Returning to the tab fetches a new code. Closing it stops its timers. An eight-second request watchdog hides the QR during a stall; the controller waits for the outstanding request to settle before sending another. Deploy the API timing fields before this website change.
+The executive board member QR display fetches a fresh code when opened. It uses API-provided durations and elapsed request time, so clock errors on the executive board member's computer do not affect the refresh schedule. Failed refreshes hide the code and retry with delays up to ten seconds; the overlay also provides a retry button. Returning to the tab fetches a new code. Closing it stops its timers. An eight-second request watchdog hides the QR during a stall; the controller waits for the outstanding request to settle before sending another. Deploy the API timing fields before this website change.
 
 The event check-in window opens 30 minutes before the start and closes 30 minutes after the end. The HMAC code rotates every 10 seconds; the API accepts the current and previous periods. A particular code therefore has about 10 to 20 seconds of validity. A recent photo can still work within that interval.
 
@@ -115,9 +115,9 @@ Authentication can fail before the attendance controller runs. An authenticated 
 
 The check-in page offers a sign-in link to visitors without a usable session. It preserves the scan through an allowlisted `next` path and returns there after sign-in. A session marked with a refresh error also takes this path, even if the client reports authenticated. The original attendance code may expire during login; in that case, scan the current QR on the screen.
 
-A different QR URL or account starts a separate attempt and clears the previous result, including when Next reuses the page. Late responses from an earlier scan cannot overwrite the current result. The page does not repeatedly submit a refused code or promise that another scan will succeed. Wait for confirmation; if scanning still fails, show the message and reference to an officer.
+A different QR URL or account starts a separate attempt and clears the previous result, including when Next reuses the page. Late responses from an earlier scan cannot overwrite the current result. The page does not repeatedly submit a refused code or promise that another scan will succeed. Wait for confirmation; if scanning still fails, show the message and reference to an executive board member.
 
-The displayed result comes from the API roster status. Existing officer decisions of absent or excused remain visible, and an unrecognized response does not count as confirmation. These changes do not extend the code validity window.
+The displayed result comes from the API roster status. Existing executive board member decisions of absent or excused remain visible, and an unrecognized response does not count as confirmation. These changes do not extend the code validity window.
 
 `lib/next-path.js` accepts only the supported `/checkin/<id>/<code>` return-path shape. Unsupported values fall back to normal portal routing. Add explicit patterns if another return destination is needed.
 
