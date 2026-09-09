@@ -117,6 +117,10 @@ The check-in page offers a sign-in link to visitors without a usable session. It
 
 A different QR URL or account starts a separate attempt and clears the previous result, including when Next reuses the page. Late responses from an earlier scan cannot overwrite the current result. The page does not repeatedly submit a refused code or promise that another scan will succeed. Wait for confirmation; if scanning still fails, show the message and reference to an executive board member.
 
+The API returns a stable error code with its message. The page uses `CHECKIN_CODE_INVALID` for fresh-scan guidance. Unavailable attendance, a closed window, a finalized roster, a missing event and server failures each direct the member to the appropriate help. The API explanation and attempt reference remain visible. See the [check-in error codes](../api/endpoints.md#post-checkineventidtoken).
+
+Only a response without a code uses the older expired-message fallback. Unknown codes receive general help instead of guessing that a fresh scan will work. This lets the website and API deploy separately for the error-code change.
+
 The displayed result comes from the API roster status. Existing executive board member decisions of absent or excused remain visible, and an unrecognized response does not count as confirmation. These changes do not extend the code validity window.
 
 `lib/next-path.js` accepts only the supported `/checkin/<id>/<code>` return-path shape. Unsupported values fall back to normal portal routing. Add explicit patterns if another return destination is needed.

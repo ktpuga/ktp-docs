@@ -452,13 +452,31 @@ The `token` path parameter is a rotating code derived from the event's attendanc
 
 Check-in opens 30 minutes before the event starts and closes 30 minutes after it ends. The API generates and validates codes using server time; the scanning phone's clock is not an input.
 
-| Condition | Response |
-| --- | --- |
-| Invalid or missing authentication | `401` |
-| Invalid event ID or event not found | `404` |
-| Attendance disabled, missing attendance secret, or invalid/expired code | `403` |
-| Outside the check-in window or roster finalized | `403` |
-| Attendance write or required lookup fails | `500` |
+Controller errors return `{ code, message }`. The code is stable for client recovery; the message is a readable explanation for members and older clients.
+
+| Code | HTTP status | Meaning and recovery |
+| --- | --- | --- |
+| `CHECKIN_EVENT_NOT_FOUND` | `404` | The event ID is invalid or the event no longer exists. Ask an executive board member for the correct event QR. |
+| `CHECKIN_UNAVAILABLE` | `403` | Attendance is disabled or the event has no attendance secret. Ask an executive board member to check attendance setup. Scanning again does not fix the setup. |
+| `CHECKIN_CODE_INVALID` | `403` | The code is invalid or expired. Scan the current QR and wait for confirmation. These two causes deliberately share one response. |
+| `CHECKIN_WINDOW_CLOSED` | `403` | Check-in is outside the event's allowed times. Ask an executive board member to check those times. |
+| `CHECKIN_ROSTER_FINALIZED` | `403` | The roster is closed. Ask an executive board member to review attendance; adding someone may require reopening it. |
+| `CHECKIN_FAILED` | `500` | A required lookup or write failed, or user repair returned no attendance row. Show the message and reference to an executive board member to check the roster. |
+
+Invalid or missing authentication returns `401` before this controller and is outside this error-code contract. The website sends the member to sign-in while preserving the supported check-in destination.
+
+Validation order remains event lookup, attendance setup/code validation, check-in window, then roster finalization. The response describes the first failed check. Diagnostic logs still distinguish disabled attendance from a missing secret; neither the secret nor the scanned code is included in these error responses.
+
+For example:
+
+```json
+{
+  "code": "CHECKIN_UNAVAILABLE",
+  "message": "Self check-in is unavailable for this event. Ask an executive board member for help."
+}
+```
+
+This is an additive response change with no migration. Older clients can continue displaying `message`. The updated website uses known codes for recovery guidance, retains the old expired-message fallback only when no code is supplied, and shows general help for unknown codes. The API and website can deploy independently for this change. The website still displays the API explanation and attempt reference.
 
 The controller checks audience eligibility for its logs but records the scan even when the attendee does not match. Empty or stale groups do not themselves cause a refusal. Eligibility queries can still fail with a database error.
 
