@@ -52,7 +52,7 @@ Votes are private from other members, but they are attributable to the executive
 
 1. Open the Presentation tab under Rushee Data, then enter presentation mode. Executive board members use the admin portal; the pledge chair uses the member portal.
 2. Approve visibility with **Show Decision Night**, then ask members to open **Decision Night** in their portal and keep it open.
-3. Show the rushee you want to discuss. Press **Open voting** when ready. The compact button and duration field sit at the top of the right-hand notes column. The same control is available on the rushee's profile. Pledge committee members who are not chairs can edit content but do not receive these voting controls.
+3. Show the rushee you want to discuss. Press **Open voting** when ready. The compact button and duration field sit in the center of the presentation header, between the title and slide count/close button. On narrow screens they wrap below those controls within the header. The same control is available on the rushee's profile. Pledge committee members who are not chairs can edit content but do not receive these voting controls.
 4. The default duration is 60 seconds. Change it before opening if needed, from 15 to 300 seconds.
 5. Members choose Strong yes, Weak yes, Undecided, Weak no, or Strong no, then press **Submit vote**. They can change their choice and press **Update vote** until the deadline.
 6. At expiry, the rushee disappears from member voting pages. Members see a confirmation of their own last recorded vote and wait for the next round.
