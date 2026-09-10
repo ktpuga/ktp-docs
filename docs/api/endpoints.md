@@ -824,55 +824,55 @@ The caller can cancel their own booking; eboard and chairs can cancel others. A 
 
 ### `GET /interviews/interviewer-schedules`
 
-**Members only; not rushees.** Returns published rounds assigned to a committee the caller belongs to, or `[]` if none apply. Committee membership requires approval through the join-request flow.
+**Active members, chairs and executive board members only.** Returns published and unpublished rounds matching a selected group or committee, or `[]` if none apply. Executive board members and pledge chairs have management access. Alumni, pledges and rushees cannot use this route, even through committee membership.
 
 Slots include `interviewer_count`, `interviewers`, `i_am_interviewing`, and `bookings` with candidate names for the people conducting the interview.
 
 ### `POST /interviews/slots/:id/interviewers`
 
-**Members only; not rushees.** An empty body assigns the caller. Eboard and chairs can send `{ "user_id": "..." }` to assign someone else.
+**Active members, chairs and executive board members only.** Eligible callers can sign up before publication. An empty body assigns the caller. Executive board members and pledge chairs can send `{ "user_id": "..." }` to assign another active member, chair, or executive board member. Assigning an alumni, pledge, rushee, deleted account, or missing account returns `403`; a malformed user ID returns `400`.
 
-Returns `403` if the required committee access is missing, or `409` with `code: "interviewers_full"` or `"already_signed_up"`.
+Returns `403` if the caller has no selected group, selected committee, or management access, or `409` with `code: "interviewers_full"` or `"already_signed_up"`.
 
 ### `DELETE /interviews/slots/:id/interviewers/:userId`
 
-Removes the caller's assignment. Eboard and chairs can remove others; a push is sent when someone else removes the assignment.
+Removes the caller's assignment. Executive board members and pledge chairs can remove others; a push is sent when someone else removes the assignment.
 
 ### `GET /interviews/schedules`
 
-**Eboard and chairs.** Returns every round, including drafts, with slot and seat counts.
+**Executive board members and pledge chairs.** Returns every round, including drafts, with slot and seat counts.
 
 ### `POST /interviews/schedules`
 
-**Eboard and chairs.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_committee_ids"? }`.
+**Executive board members and pledge chairs.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_groups"?, "interviewer_committee_ids"? }`.
 
 ### `GET /interviews/schedules/:id`
 
-**Eboard and chairs.** Returns the full signup sheet, including slots, bookings, and interviewer assignments.
+**Executive board members and pledge chairs.** Returns the full signup sheet, including slots, bookings, and interviewer assignments.
 
 ### `PATCH /interviews/schedules/:id`
 
-**Eboard and chairs.** Updates round settings, including publication and interviewer committees. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
+**Executive board members and pledge chairs.** Updates round settings, including publication and interviewer groups/committees. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
 
-Omitting `interviewer_committee_ids` preserves the current list. An empty array removes committee-based access to the round, leaving eboard access. A non-array or malformed ID returns `400`.
+Omitting `interviewer_groups` or `interviewer_committee_ids` preserves that selection. Empty arrays clear only their respective selection. Allowed groups are `active`, `chair`, and `eboard`; alumni, pledge and rush are rejected. Group and committee matching is a union. Clearing both leaves executive board and pledge-chair access. Invalid input returns `400`. Migration `1791100000000_add-interviewer-groups.sql` adds the group list with an empty default, preserving existing committee targeting.
 
 ### `DELETE /interviews/schedules/:id`
 
-**Eboard and chairs.** Returns `409` with `code: "has_bookings"` and the count when bookings exist. `?force=true` deletes the round and notifies affected participants.
+**Executive board members and pledge chairs.** Returns `409` with `code: "has_bookings"` and the count when bookings exist. `?force=true` deletes the round and notifies affected participants.
 
 ### `POST /interviews/schedules/:id/slots`
 
-**Eboard and chairs.** Accepts `{ "starts_at", "ends_at", "location"?, "capacity"?, "interviewer_capacity"? }`. Limits are 50 seats and 10 interviewers per slot, and 500 slots per schedule.
+**Executive board members and pledge chairs.** Accepts `{ "starts_at", "ends_at", "location"?, "capacity"?, "interviewer_capacity"? }`. Limits are 50 seats and 10 interviewers per slot, and 500 slots per schedule.
 
 ### `PATCH /interviews/slots/:id`
 
-**Eboard and chairs.** Updates supplied keys only; an explicit null clears a nullable field.
+**Executive board members and pledge chairs.** Updates supplied keys only; an explicit null clears a nullable field.
 
 Returns `409` if either capacity is lower than the number already assigned. This has no force override. Changing the start time notifies candidates and interviewers separately; capacity-only changes do not send notifications.
 
 ### `DELETE /interviews/slots/:id`
 
-**Eboard and chairs.** Returns `409` with `code: "has_bookings"` for a booked slot unless `?force=true`. Candidates and interviewers receive separate notification wording.
+**Executive board members and pledge chairs.** Returns `409` with `code: "has_bookings"` for a booked slot unless `?force=true`. Candidates and interviewers receive separate notification wording.
 
 ---
 

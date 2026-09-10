@@ -4,7 +4,7 @@ sidebar_position: 8
 
 # Interviews
 
-Interview managers publish rounds of timed slots. Candidates claim a seat, and designated members can separately sign up to conduct interviews.
+Interview managers create rounds of timed slots. Eligible active members can sign up to conduct interviews before publication. Publishing makes the times visible and bookable to rushees.
 
 Management requires eboard or the chair of the committee marked `slug = 'pledge'`. The general `chair` group does not grant it.
 
@@ -32,7 +32,7 @@ interview_schedules
 
 ### `interview_schedules`
 
-A round has a title, optional description/default location, publication state, and `interviewer_committee_ids`. Empty committee targeting grants no ordinary committee member permission to staff it; managers have separate access.
+A round has a title, optional description/default location, publication state, `interviewer_groups`, and `interviewer_committee_ids`. Matching either a selected group or a selected committee grants interviewer access. Empty selections grant neither; managers have separate access.
 
 ### `interview_slots`
 
@@ -85,23 +85,23 @@ The round-level uniqueness constraint resolves races across different slots. Exp
 
 ## Interviewer signup
 
-Managers choose eligible committees and per-slot interviewer capacity.
+Managers choose eligible groups, committees, or both, and per-slot interviewer capacity. Group choices are active members, chairs and executive board members. Alumni, pledges and rushees cannot list or claim interviewer slots, even if they belong to a selected committee.
 
 ### Who may sign up
 
-Ordinary callers must belong to a designated committee. Eboard and the pledge chair qualify through `canManage`. Signup routes also require a member group, excluding rushees.
+Active members and chairs must match a selected group or committee. Executive board members and pledge chairs qualify through `canManage`. Selecting Active includes chairs and executive board members through the API's existing implied-active groups. Empty group and committee selections leave only manager access.
 
 Committee membership requires approval; it is not immediate self-join access.
 
 ### Claiming a spot is contended, exactly like booking
 
-Interviewer signup locks the slot on a dedicated connection before checking its count. Expected conflicts include `full` and `already_signed_up`, both `409`; unpublished slots return `404`.
+Interviewer signup locks the slot on a dedicated connection before checking its count. Expected conflicts include `full` and `already_signed_up`, both `409`. Unpublished slots accept eligible interviewer signups. Candidate booking still requires publication.
 
 The existing-signup check runs before capacity so a member already occupying the last place receives the correct explanation. The candidate booking path still checks capacity first; repeating a booking on a full slot can therefore report `full`.
 
 ### What an interviewer sees
 
-`findForInterviewer` returns eligible published rounds, slots, candidate bookings, interviewer names, and `i_am_interviewing`. Managers can see published rounds without joining a designated committee.
+`findForInterviewer` returns eligible published and unpublished rounds, slots, candidate bookings, interviewer names, and `i_am_interviewing`. Managers can see both states without joining a designated committee. Other callers match a selected group or committee.
 
 Candidate-facing queries omit those name lists. `mine` refers to a candidate booking and must not be reused to mean interviewer signup.
 
@@ -111,7 +111,7 @@ Candidate-facing queries omit those name lists. `mine` refers to a candidate boo
 
 ## Drafts and publishing
 
-Rounds begin as drafts. The UI requires at least one slot before publishing. Unpublished rounds do not accept new candidate or interviewer claims.
+Rounds begin as drafts. The UI requires at least one slot before publishing. Unpublished rounds accept eligible interviewer claims, but remain hidden and unavailable for new rushee bookings. Unpublishing does not stop interviewer signup.
 
 Unpublishing retains existing bookings. The false-to-true publication transition sends the rush notification; an ordinary save while already published does not.
 
@@ -262,7 +262,7 @@ Member-group route gate plus committee/manager checks:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/interviews/interviewer-schedules` | Eligible published rounds |
+| `GET` | `/interviews/interviewer-schedules` | Eligible published and unpublished rounds |
 | `POST` | `/interviews/slots/:id/interviewers` | Claim a place; managers may supply `user_id` |
 | `DELETE` | `/interviews/slots/:id/interviewers/:userId` | Withdraw or remove |
 
@@ -286,15 +286,15 @@ These routes use `requirePledgeManage`: eboard or pledge chair.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/interviews/schedules` | Rounds including drafts |
-| `POST` | `/interviews/schedules` | Draft from `{ title, description?, location?, interviewer_committee_ids? }` |
+| `POST` | `/interviews/schedules` | Draft from `{ title, description?, location?, interviewer_groups?, interviewer_committee_ids? }` |
 | `GET` | `/interviews/schedules/:id` | Full schedule |
-| `PATCH` | `/interviews/schedules/:id` | Metadata, publication, eligible committees |
+| `PATCH` | `/interviews/schedules/:id` | Metadata, publication, eligible groups/committees |
 | `DELETE` | `/interviews/schedules/:id` | Delete; confirm booked rounds with `force=true` |
 | `POST` | `/interviews/schedules/:id/slots` | `{ starts_at, ends_at, location?, capacity?, interviewer_capacity? }` |
 | `PATCH` | `/interviews/slots/:id` | Edit without reducing below existing claims |
 | `DELETE` | `/interviews/slots/:id` | Delete; confirm booked slots with `force=true` |
 
-An omitted `interviewer_committee_ids` leaves targeting unchanged; an empty array clears it. Non-arrays and invalid IDs return `400` rather than being treated as an empty selection.
+Omitting either targeting field preserves its current value. An empty array clears only that selection. `interviewer_groups` accepts `active`, `chair`, and `eboard`; other groups or non-arrays return `400`. Invalid committee IDs also return `400`. Existing rounds keep their committees and begin with no selected groups after migration `1791100000000_add-interviewer-groups.sql`. Apply the migration before the API rollout, then deploy the website.
 
 ## Limits
 
@@ -314,3 +314,6 @@ The recorded UI does not include a manager picker for assigning interviewers eve
 
 
 For timed member voting from the presentation, see [Decision-night voting](./decision-night.md). Voting does not expose private interview notes.
+
+
+Interviewer signup is available at `/member/interviews`; executive board members use the Sign Up tab at `/admin/interviews`. The member link does not require pledge committee membership. No alumni or pledge interviewer pages are provided.
