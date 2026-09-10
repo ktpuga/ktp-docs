@@ -824,55 +824,55 @@ The caller can cancel their own booking; eboard and chairs can cancel others. A 
 
 ### `GET /interviews/interviewer-schedules`
 
-**Active members, chairs and executive board members only.** Returns published and unpublished rounds matching a selected group or committee, or `[]` if none apply. Executive board members and pledge chairs have management access. Alumni, pledges and rushees cannot use this route, even through committee membership.
+**Active members, chairs and executive board members only.** Returns published and unpublished rounds matching a selected group or committee, or `[]` if none apply. Executive board members and the pledge chair have management access. Alumni, pledges and rushees cannot use this route, even through committee membership.
 
 Slots include `interviewer_count`, `interviewers`, `i_am_interviewing`, and `bookings` with candidate names for the people conducting the interview.
 
 ### `POST /interviews/slots/:id/interviewers`
 
-**Active members, chairs and executive board members only.** Eligible callers can sign up before publication. An empty body assigns the caller. Executive board members and pledge chairs can send `{ "user_id": "..." }` to assign another active member, chair, or executive board member. Assigning an alumni, pledge, rushee, deleted account, or missing account returns `403`; a malformed user ID returns `400`.
+**Active members, chairs and executive board members only.** Eligible callers can sign up before publication. An empty body assigns the caller. Executive board members and the pledge chair can send `{ "user_id": "..." }` to assign another active member, chair, or executive board member. Assigning an alumni, pledge, rushee, deleted account, or missing account returns `403`; a malformed user ID returns `400`.
 
 Returns `403` if the caller has no selected group, selected committee, or management access, or `409` with `code: "interviewers_full"` or `"already_signed_up"`.
 
 ### `DELETE /interviews/slots/:id/interviewers/:userId`
 
-Removes the caller's assignment. Executive board members and pledge chairs can remove others; a push is sent when someone else removes the assignment.
+Removes the caller's assignment. Executive board members and the pledge chair can remove others; a push is sent when someone else removes the assignment.
 
 ### `GET /interviews/schedules`
 
-**Executive board members and pledge chairs.** Returns every round, including drafts, with slot and seat counts.
+**Executive board members and the pledge chair.** Returns every round, including drafts, with slot and seat counts.
 
 ### `POST /interviews/schedules`
 
-**Executive board members and pledge chairs.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_groups"?, "interviewer_committee_ids"? }`.
+**Executive board members and the pledge chair.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_groups"?, "interviewer_committee_ids"? }`.
 
 ### `GET /interviews/schedules/:id`
 
-**Executive board members and pledge chairs.** Returns the full signup sheet, including slots, bookings, and interviewer assignments.
+**Executive board members and the pledge chair.** Returns the full signup sheet, including slots, bookings, and interviewer assignments.
 
 ### `PATCH /interviews/schedules/:id`
 
-**Executive board members and pledge chairs.** Updates round settings, including publication and interviewer groups/committees. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
+**Executive board members and the pledge chair.** Updates round settings, including publication and interviewer groups/committees. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
 
 Omitting `interviewer_groups` or `interviewer_committee_ids` preserves that selection. Empty arrays clear only their respective selection. Allowed groups are `active`, `chair`, and `eboard`; alumni, pledge and rush are rejected. Group and committee matching is a union. Clearing both leaves executive board and pledge-chair access. Invalid input returns `400`. Migration `1791100000000_add-interviewer-groups.sql` adds the group list with an empty default, preserving existing committee targeting.
 
 ### `DELETE /interviews/schedules/:id`
 
-**Executive board members and pledge chairs.** Returns `409` with `code: "has_bookings"` and the count when bookings exist. `?force=true` deletes the round and notifies affected participants.
+**Executive board members and the pledge chair.** Returns `409` with `code: "has_bookings"` and the count when bookings exist. `?force=true` deletes the round and notifies affected participants.
 
 ### `POST /interviews/schedules/:id/slots`
 
-**Executive board members and pledge chairs.** Accepts `{ "starts_at", "ends_at", "location"?, "capacity"?, "interviewer_capacity"? }`. Limits are 50 seats and 10 interviewers per slot, and 500 slots per schedule.
+**Executive board members and the pledge chair.** Accepts `{ "starts_at", "ends_at", "location"?, "capacity"?, "interviewer_capacity"? }`. Limits are 50 seats and 10 interviewers per slot, and 500 slots per schedule.
 
 ### `PATCH /interviews/slots/:id`
 
-**Executive board members and pledge chairs.** Updates supplied keys only; an explicit null clears a nullable field.
+**Executive board members and the pledge chair.** Updates supplied keys only; an explicit null clears a nullable field.
 
 Returns `409` if either capacity is lower than the number already assigned. This has no force override. Changing the start time notifies candidates and interviewers separately; capacity-only changes do not send notifications.
 
 ### `DELETE /interviews/slots/:id`
 
-**Executive board members and pledge chairs.** Returns `409` with `code: "has_bookings"` for a booked slot unless `?force=true`. Candidates and interviewers receive separate notification wording.
+**Executive board members and the pledge chair.** Returns `409` with `code: "has_bookings"` for a booked slot unless `?force=true`. Candidates and interviewers receive separate notification wording.
 
 ---
 
@@ -1806,6 +1806,8 @@ Deploy the website and API correlation changes together. They require no schema 
 
 ## Decision-night voting
 
+Viewing and management are separate from voting eligibility. Test executive-board accounts with matching JWT/database membership may read the current round and visibility, change visibility, open/close rounds and read results. They receive `can_manage: true` and `can_vote: false`; vote and flag writes return `403`. Other test accounts remain excluded.
+
 All routes require bearer authentication. See [Decision-night voting](../website/decision-night.md) for the presenter procedure, eligibility and privacy rules. Responses use `Cache-Control: private, no-store`.
 
 | Method | Route | Access and response |
@@ -1827,9 +1829,9 @@ Decision-night visibility requires migration `1791200000000_add-decision-night-v
 
 ### Presentation sections and optional flags
 
-`PUT /rush-data/:id/presentation/sections/:section` is available to executive board members and active pledge committee members. The section is `summary`, `events`, `interview`, or `committee`. Send `{body_html, version}`: HTML is limited to 30,000 characters, with `version: 0` for a new section. The response contains sanitized HTML, the new version, and saved author/time. A stale version returns `409 presentation_conflict` without changing saved content. Invalid sections/HTML/version return `400`; an unrelated member receives `403`; a non-rushee target receives `404`.
+`PUT /rush-data/:id/presentation/sections/:section` is available to executive board members and active pledge committee members. The editable section is `summary`, `interview`, or `committee`. An attempt to edit `events` returns `403 attendance_read_only`; events come from recorded attendance. Send `{body_html, version}`: HTML is limited to 30,000 characters, with `version: 0` for a new section. The response contains sanitized HTML, the new version, and saved author/time. A stale version returns `409 presentation_conflict` without changing saved content. Invalid sections/HTML/version return `400`; an unrelated member receives `403`; a non-rushee target receives `404`.
 
-The deck and authorized rushee profile include `presentation_sections`. The deck also includes recorded `attended_events`. These are not raw interview notes. The legacy plain-text presentation endpoints now permit active pledge committee editors too; existing plain text is retained as the initial summary fallback.
+The deck and authorized rushee profile include the three editable `presentation_sections`; historical event-text overrides are retained in storage but omitted from responses. The deck also includes recorded `attended_events`. These are not raw interview notes. The legacy plain-text presentation endpoints now permit active pledge committee editors too; existing plain text is retained as the initial summary fallback.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
@@ -1837,3 +1839,5 @@ The deck and authorized rushee profile include `presentation_sections`. The deck
 | GET | `/decision-night/candidates/:candidateId/flags` | Executive board or eligible pledge committee presenter receives only candidate ID, most recent round ID, and green/red totals. Hidden Decision Night returns null totals. |
 
 `GET /decision-night/current` includes the caller's `own_flag` on an active round. The restricted results response includes a separate `flags` list with names; flag-only participants do not create a five-choice vote. Private ballot counts/choices are not added to the projected totals response. Apply migrations `1791300000000` and `1791400000000` before deploying these endpoints.
+
+The Decision Night presentation deck includes `resume_filename` and `resume_mime` for the protected resume viewer, never the storage path. Candidate names in the deck and voting responses use first plus last name, with username fallback. Resume downloads continue through the existing authenticated resume endpoint.

@@ -6,29 +6,33 @@ Decision night lets an executive board member or pledge chair open a timed vote 
 
 ## Slide layout and editing
 
-The slide follows three columns: photo and profile details on the left; summary, events attended, and interview notes in the middle; pledge committee notes on the right. Live green/red flag totals appear below the profile.
+The slide follows three columns: a smaller photo, full name, profile details, resume button and events attended on the left; summary and interview notes in the middle; pledge committee notes on the right. The resume button sits directly below the photo. Graduation date and GPA share a row, and green/red flag totals appear side by side below the profile.
 
-Active pledge committee members and executive board members can open **Edit mode** from Rushee Data > Presentation. Each of the four text sections has its own editor and **Save section** button. Formatting includes bold, italic, underline, lists, text size, color and alignment. **HTML** switches that section to source editing. Scripts, images, links, embeds and unsupported styles are removed; the API sanitizes saved content and the website sanitizes displayed content.
+Active pledge committee members and executive board members can open **Edit mode** from Rushee Data > Presentation. Each of the three editable text sections has its own editor and **Save section** button. Formatting includes bold, italic, underline, lists, text size, color and alignment. **HTML** switches that section to source editing. Scripts, images, links, embeds and unsupported styles are removed; the API sanitizes saved content and the website sanitizes displayed content.
 
-**Presentation mode** hides the editing controls and uses the finished layout. Save or discard changed sections before switching mode, moving to another rushee, or closing the deck. If someone else saved the same section first, the API returns a conflict and keeps your draft onscreen. You can copy it before choosing **Discard draft and load the newer saved section**. Separate sections do not overwrite one another.
+**Presentation mode** uses the finished layout and has no Edit mode switch. Close the presentation and use the editing button in the portal to change content. Save or discard changed sections before moving to another rushee or closing the editor. If someone else saved the same section first, the API returns a conflict and keeps your draft onscreen. You can copy it before choosing **Discard draft and load the newer saved section**. Separate sections do not overwrite one another.
 
-Existing plain-text write-ups supply the summary until a formatted summary is saved. Recorded attendance supplies the events section until that section is edited. Editing those words does not change actual attendance. Interview and committee sections are presentation-specific summaries; private interview notes are not copied onto the slide automatically. A saved empty section intentionally stays empty.
+Existing plain-text write-ups supply the summary until a formatted summary is saved. Events attended is a read-only list of recorded attendance, using the same text size as the other profile details. Previously saved event-text overrides are ignored; changing attendance must use the attendance tools. Interview and committee sections are presentation-specific summaries; private interview notes are not copied onto the slide automatically. A saved empty section intentionally stays empty.
 
-Editing content does not grant permission to approve visibility, open voting, or see named results. Those controls remain restricted to executive board members and pledge chairs.
+Editing content does not grant permission to approve visibility, open voting, or see named results. Those controls remain restricted to executive board members and the pledge chair.
+
+**View resume** opens the existing protected file popup without leaving the slide. PDFs display inside the popup; unsupported formats offer a download. A missing resume is labeled clearly. Escape closes the popup without closing the slide, and slide navigation pauses while the popup is open.
+
+Slides, editor controls and the voting timer follow the portal's light/dark theme. Candidate names use saved first and last names; the username is the fallback when both are absent. Preferred names do not replace full names on slides or voting prompts.
 
 ## Optional live flags
 
 During an open voting round, eligible members can choose **Green flag** or **Red flag** beside their ballot, or leave both unset. Clicking the selected flag again or using **Clear flag** removes it. Each account has at most one flag per round; flags can change only while voting is open and Decision Night is visible. A flag is independent of the five-choice vote.
 
-The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and pledge chairs can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
+The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and the pledge chair can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
 
 ## Visibility approval
 
-Decision Night starts hidden from ordinary members. An executive board member or pledge chair opens **Decision Night** in their portal and presses **Show Decision Night** when approved. Managers retain the page and results link while hidden. Other members see the sidebar link only after approval; a saved URL shows an unavailable message while hidden.
+Decision Night starts hidden from ordinary members. An executive board member or pledge chair opens **Decision Night** in their portal and presses **Show Decision Night** when approved. Executive board members use `/admin/decision-night`; the pledge chair uses `/member/decision-night`. Managers retain the page and results link while hidden. Other members see the sidebar link only after approval; a saved URL shows an unavailable message while hidden.
 
 **Hide Decision Night** removes member access and blocks new votes and opening rounds. It does not delete votes, close rounds, or reset deadlines. If shown again before an existing round expires, that round returns with its original deadline. Use the separate **Close voting now** action to end a round early.
 
-The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain restricted to executive board members and pledge chairs regardless of visibility.
+The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain restricted to executive board members and the pledge chair regardless of visibility.
 
 ## Who can do what
 
@@ -40,15 +44,15 @@ The setting is shared and stored in Postgres. The member sidebar checks visibili
 | Executive board member | Yes | Yes | Yes |
 | Pledge, rushee, or alumnus | No | No | No |
 
-Voting requires an eligible JWT group and an eligible current database membership. Deleted accounts and test accounts cannot vote. Management requires executive board membership in both places or the existing pledge committee chair assignment in Postgres. Being the chair of another committee does not grant management access.
+Voting requires an eligible JWT group and an eligible current database membership. Deleted accounts and test accounts cannot vote. A test account with executive-board membership in both its JWT and database record can view Decision Night, show/hide it, open/close rounds and inspect results. It receives no ballot or flag controls; the API rejects its vote and flag submissions. Other test accounts remain excluded. Management requires executive board membership in both places or the existing pledge committee chair assignment in Postgres. Being the chair of another committee does not grant management access.
 
-Votes are private from other members, but they are attributable to the executive board and pledge chairs. The API derives voter identity from the authenticated account. Ordinary member responses contain only that person's own selection. They never include other votes or totals. Private interview notes are not sent to the voting page.
+Votes are private from other members, but they are attributable to the executive board and the pledge chair. The API derives voter identity from the authenticated account. Ordinary member responses contain only that person's own selection. They never include other votes or totals. Private interview notes are not sent to the voting page.
 
 ## Running the meeting
 
-1. Open the Presentation tab under Rushee Data, then enter presentation mode. Executive board members use the admin portal; pledge chairs use the member portal.
+1. Open the Presentation tab under Rushee Data, then enter presentation mode. Executive board members use the admin portal; the pledge chair uses the member portal.
 2. Approve visibility with **Show Decision Night**, then ask members to open **Decision Night** in their portal and keep it open.
-3. Show the rushee you want to discuss. Press **Open voting** when ready. The same control is available on the rushee's profile.
+3. Show the rushee you want to discuss. Press **Open voting** when ready. The compact button and duration field sit at the top of the right-hand notes column. The same control is available on the rushee's profile. Pledge committee members who are not chairs can edit content but do not receive these voting controls.
 4. The default duration is 60 seconds. Change it before opening if needed, from 15 to 300 seconds.
 5. Members choose Strong yes, Weak yes, Undecided, Weak no, or Strong no, then press **Submit vote**. They can change their choice and press **Update vote** until the deadline.
 6. At expiry, the rushee disappears from member voting pages. Members see a confirmation of their own last recorded vote and wait for the next round.
@@ -58,7 +62,7 @@ Only one voting round can be open at a time. Opening the same rushee again after
 
 ## Reviewing results
 
-Executive board members and pledge chairs can follow **View voting results** from their Decision Night voting page. Choose a round and press Refresh to see current totals and attributed votes. The page lists the most recent 100 rounds; older rounds remain stored and accessible by their API ID. Results do not update automatically.
+Executive board members and the pledge chair can follow **View voting results** from their Decision Night voting page. Choose a round and press Refresh to see current totals and attributed votes. The page lists the most recent 100 rounds; older rounds remain stored and accessible by their API ID. Results do not update automatically.
 
 Keep this page off the projector: it contains names and choices. The presentation itself contains voting controls and the countdown, not individual votes. A manager can use **Close voting now** on the results page to end a round early.
 

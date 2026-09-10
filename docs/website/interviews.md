@@ -89,7 +89,7 @@ Managers choose eligible groups, committees, or both, and per-slot interviewer c
 
 ### Who may sign up
 
-Active members and chairs must match a selected group or committee. Executive board members and pledge chairs qualify through `canManage`. Selecting Active includes chairs and executive board members through the API's existing implied-active groups. Empty group and committee selections leave only manager access.
+Active members and chairs must match a selected group or committee. Executive board members and the pledge chair qualify through `canManage`. Selecting Active includes chairs and executive board members through the API's existing implied-active groups. Empty group and committee selections leave only manager access.
 
 Committee membership requires approval; it is not immediate self-join access.
 
@@ -319,4 +319,6 @@ For timed member voting from the presentation, see [Decision-night voting](./dec
 Interviewer signup is available at `/member/interviews`; executive board members use the Sign Up tab at `/admin/interviews`. The member link does not require pledge committee membership. No alumni or pledge interviewer pages are provided.
 
 
-Decision-night presentation now has separate Edit and Presentation modes with four independently saved formatted sections. The interview section is a curated summary, not an automatic copy of private interview notes. See [slide editing and live flags](./decision-night.md#slide-layout-and-editing) for the current workflow and migration requirements.
+Decision Night uses full candidate names and a smaller photo. Events attended and the protected resume popup sit in the profile column. Open editing from the portal; the projected presentation has no mode switch. The slide and timer follow the portal theme. See [Decision Night](decision-night.md) for visibility and voting controls.
+
+Decision-night presentation now has separate Edit and Presentation modes with three independently saved formatted sections and a read-only attendance list. The interview section is a curated summary, not an automatic copy of private interview notes. See [slide editing and live flags](./decision-night.md#slide-layout-and-editing) for the current workflow and migration requirements.
