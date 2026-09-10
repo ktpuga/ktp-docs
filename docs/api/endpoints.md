@@ -703,7 +703,7 @@ Returns the decision-night deck, ordered by display name:
 ]
 ```
 
-`findDeck` starts from `users` and left-joins the write-up. Rushees without notes or an interview booking still appear. A missing `presentation_body` is null, not an empty string, so the editor can count unwritten slides.
+`findDeck` starts from `users` and left-joins the write-up. Rushees without notes or an interview booking still appear. A missing `presentation_body` is null, not an empty string, and the new editor can use it as the summary fallback.
 
 ### `GET /rush-data/:id`
 
@@ -739,13 +739,13 @@ Interview notes are fetched separately by `booking_id` through the existing `Int
 
 ### `PUT /rush-data/:id/presentation`
 
-**Eboard or the pledge committee chair.** Accepts `{ "body": "..." }`, up to `TEXT_LIMITS.PRESENTATION_NOTE` (3000 characters), and returns the saved row. Validation errors return `400` with `field: "body"`.
+**Executive board or active pledge committee members.** Accepts `{ "body": "..." }`, up to `TEXT_LIMITS.PRESENTATION_NOTE` (3000 characters), and returns the saved row. Validation errors return `400` with `field: "body"`.
 
-There is one write-up per candidate. Repeated saves update it, and the last save wins. Both `requirePledgeManage` on the route and `mayEditPresentation` in the controller enforce access.
+There is one write-up per candidate. Repeated saves update it, and the last save wins. The authenticated route and `mayEditPresentation` controller check enforce access. This is the legacy plain-text fallback; formatted sections take precedence after they are saved.
 
 ### `DELETE /rush-data/:id/presentation`
 
-**Eboard or the pledge committee chair.** Clears the write-up. Returns `204`, or `404` when none exists. Use this endpoint to clear it instead of saving an empty string.
+**Executive board or active pledge committee members.** Clears the write-up. Returns `204`, or `404` when none exists. Use this endpoint to clear it instead of saving an empty string.
 
 ---
 
@@ -1810,7 +1810,9 @@ All routes require bearer authentication. See [Decision-night voting](../website
 
 | Method | Route | Access and response |
 | --- | --- | --- |
-| GET | `/decision-night/current` | Eligible voters: server time, active rushee name/photo/major, deadline, own selection and capability flags. After closure, no rushee data; own last vote confirmation only. |
+| GET | `/decision-night/visibility` | Eligible voters: `{visible, can_manage}` for navigation. No candidate or ballot data. |
+| PUT | `/decision-night/visibility` | Executive board or pledge chair: `{visible: true}` or `{visible: false}`. Stored globally; defaults to false. Hiding preserves rounds, deadlines and saved votes. |
+| GET | `/decision-night/current` | Eligible voters: visibility, server time, active rushee name/photo/major, deadline, own selection and capability flags. While hidden, `round` and `last_vote` are null. After closure, no rushee data; own last vote confirmation only. |
 | POST | `/decision-night/rounds` | Executive board or pledge chair: `{candidate_id, seconds, request_id}`. UUID request ID makes retries return the same round. Duration must be an integer from 15 to 300 seconds. |
 | PUT | `/decision-night/rounds/:id/vote` | Eligible voters: `{choice}` only. Choices: `strong_yes`, `weak_yes`, `undecided`, `weak_no`, `strong_no`. One ballot per authenticated voter per round, editable until close. |
 | POST | `/decision-night/rounds/:id/close` | Executive board or pledge chair: close early; repeat calls are safe. |
@@ -1818,3 +1820,20 @@ All routes require bearer authentication. See [Decision-night voting](../website
 | GET | `/decision-night/rounds/:id/results` | Executive board or pledge chair: totals and attributed votes for that round. |
 
 The API rejects a second active round with `409 round_already_open`, late voting with `409 voting_closed`, and invalid open-request reuse with `409 request_conflict`. Validation errors are 400, missing candidates/rounds are 404, and permission failures are `403 decision_night_forbidden`. No client-supplied voter identity or deadline is accepted. Management permission is checked on every request. The website proxy rejects cross-origin writes and forwards only the listed paths.
+
+
+Decision-night visibility requires migration `1791200000000_add-decision-night-visibility.sql`. While hidden, opening a round or submitting a vote returns `403` with `decision_night_hidden`. Invalid visibility payloads return `400` with `invalid_visibility`; unauthorized callers receive `403`. Visibility changes, round opening and vote submissions share a transaction lock so queued votes recheck visibility before writing. Hiding is not an early-close action, and showing does not extend a deadline. Managers can still read results while hidden.
+
+
+### Presentation sections and optional flags
+
+`PUT /rush-data/:id/presentation/sections/:section` is available to executive board members and active pledge committee members. The section is `summary`, `events`, `interview`, or `committee`. Send `{body_html, version}`: HTML is limited to 30,000 characters, with `version: 0` for a new section. The response contains sanitized HTML, the new version, and saved author/time. A stale version returns `409 presentation_conflict` without changing saved content. Invalid sections/HTML/version return `400`; an unrelated member receives `403`; a non-rushee target receives `404`.
+
+The deck and authorized rushee profile include `presentation_sections`. The deck also includes recorded `attended_events`. These are not raw interview notes. The legacy plain-text presentation endpoints now permit active pledge committee editors too; existing plain text is retained as the initial summary fallback.
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| PUT | `/decision-night/rounds/:id/flag` | Eligible voter sends `{flag: "green"}`, `{flag: "red"}`, or `{flag: null}`. Identity comes from the token. Requires visible, open voting; clear/change obeys the same deadline. |
+| GET | `/decision-night/candidates/:candidateId/flags` | Executive board or eligible pledge committee presenter receives only candidate ID, most recent round ID, and green/red totals. Hidden Decision Night returns null totals. |
+
+`GET /decision-night/current` includes the caller's `own_flag` on an active round. The restricted results response includes a separate `flags` list with names; flag-only participants do not create a five-choice vote. Private ballot counts/choices are not added to the projected totals response. Apply migrations `1791300000000` and `1791400000000` before deploying these endpoints.

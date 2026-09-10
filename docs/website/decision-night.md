@@ -4,6 +4,32 @@ title: Decision-night voting
 
 Decision night lets an executive board member or pledge chair open a timed vote for the rushee currently being discussed. Members vote from their own portal. The API stores votes and decides when voting closes.
 
+## Slide layout and editing
+
+The slide follows three columns: photo and profile details on the left; summary, events attended, and interview notes in the middle; pledge committee notes on the right. Live green/red flag totals appear below the profile.
+
+Active pledge committee members and executive board members can open **Edit mode** from Rushee Data > Presentation. Each of the four text sections has its own editor and **Save section** button. Formatting includes bold, italic, underline, lists, text size, color and alignment. **HTML** switches that section to source editing. Scripts, images, links, embeds and unsupported styles are removed; the API sanitizes saved content and the website sanitizes displayed content.
+
+**Presentation mode** hides the editing controls and uses the finished layout. Save or discard changed sections before switching mode, moving to another rushee, or closing the deck. If someone else saved the same section first, the API returns a conflict and keeps your draft onscreen. You can copy it before choosing **Discard draft and load the newer saved section**. Separate sections do not overwrite one another.
+
+Existing plain-text write-ups supply the summary until a formatted summary is saved. Recorded attendance supplies the events section until that section is edited. Editing those words does not change actual attendance. Interview and committee sections are presentation-specific summaries; private interview notes are not copied onto the slide automatically. A saved empty section intentionally stays empty.
+
+Editing content does not grant permission to approve visibility, open voting, or see named results. Those controls remain restricted to executive board members and pledge chairs.
+
+## Optional live flags
+
+During an open voting round, eligible members can choose **Green flag** or **Red flag** beside their ballot, or leave both unset. Clicking the selected flag again or using **Clear flag** removes it. Each account has at most one flag per round; flags can change only while voting is open and Decision Night is visible. A flag is independent of the five-choice vote.
+
+The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and pledge chairs can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
+
+## Visibility approval
+
+Decision Night starts hidden from ordinary members. An executive board member or pledge chair opens **Decision Night** in their portal and presses **Show Decision Night** when approved. Managers retain the page and results link while hidden. Other members see the sidebar link only after approval; a saved URL shows an unavailable message while hidden.
+
+**Hide Decision Night** removes member access and blocks new votes and opening rounds. It does not delete votes, close rounds, or reset deadlines. If shown again before an existing round expires, that round returns with its original deadline. Use the separate **Close voting now** action to end a round early.
+
+The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain restricted to executive board members and pledge chairs regardless of visibility.
+
 ## Who can do what
 
 | Person | Vote | Open or close voting | See results and voter names |
@@ -21,7 +47,7 @@ Votes are private from other members, but they are attributable to the executive
 ## Running the meeting
 
 1. Open the Presentation tab under Rushee Data, then enter presentation mode. Executive board members use the admin portal; pledge chairs use the member portal.
-2. Ask members to open **Decision Night** in their portal and keep it open.
+2. Approve visibility with **Show Decision Night**, then ask members to open **Decision Night** in their portal and keep it open.
 3. Show the rushee you want to discuss. Press **Open voting** when ready. The same control is available on the rushee's profile.
 4. The default duration is 60 seconds. Change it before opening if needed, from 15 to 300 seconds.
 5. Members choose Strong yes, Weak yes, Undecided, Weak no, or Strong no, then press **Submit vote**. They can change their choice and press **Update vote** until the deadline.
@@ -48,8 +74,10 @@ No scheduled task is needed to close voting. Every read and vote checks the dead
 
 ## Deployment and checks
 
-Apply API migration `1791000000000_add-decision-night-voting.sql` before using the routes. Deploy the API before the website. This migration adds rounds and ballots; it does not change attendance.
+Apply API migrations `1791000000000_add-decision-night-voting.sql` and `1791200000000_add-decision-night-visibility.sql` before using the updated routes. The visibility migration defaults to hidden and leaves existing rounds and votes unchanged. Deploy the API before the website. The original voting migration adds rounds and ballots; none of these migrations changes attendance.
 
-Run the API suite against the existing isolated test database. Website coverage is in `scripts/test-decision-night.cjs`, included in the standard auth CI step. Tests cover permissions, private responses, duplicate submissions, concurrent opening, requests delayed beyond expiry, browser candidate changes and the website proxy's origin check.
+Also apply `1791300000000_add-presentation-sections.sql` and `1791400000000_add-decision-night-flags.sql` before this version of the API. Existing write-ups, voting rounds and ballots are preserved.
+
+Run the API suite against the existing isolated test database. Website coverage is in `scripts/test-decision-night.cjs` and `scripts/test-decision-slides.cjs`, included in the standard auth CI step. Tests cover permissions, private responses, duplicate submissions, concurrent opening, requests delayed beyond expiry, browser candidate changes and the website proxy's origin check.
 
 Before the meeting, rehearse with permitted accounts in a non-production environment: open a round, vote, change a vote, let it expire, open the next rushee, and inspect results as both a manager and an ordinary member. Do not create test votes in the real meeting's records.

@@ -216,22 +216,22 @@ The editor continues bullets on Enter and indents applicable bullet lines on Tab
 
 **Rush Data → Presentation → Decision night** displays one candidate per slide. It uses `GET /rush-data/presentation` without a schedule ID.
 
-The display uses curated `rushee_presentations`, not raw interview notes. It includes every current rushee through a roster-driven left join, even when no write-up or interview booking exists.
+The display uses curated `rushee_presentation_sections`, with legacy `rushee_presentations` as the initial summary fallback, rather than raw interview notes. It includes every current rushee through a roster-driven left join, even when no write-up or interview booking exists.
 
 Slides show identity, photo, major, minors, graduation, GPA, and referral information. Render GPA as the API's nullable numeric string and graduation as stored semester text.
 
-The view is read-only. Arrow keys or Space advance, and Escape closes. Edit write-ups in the Presentation tab before projecting them.
+Presentation mode is read-only. Arrow keys or Space advance, and Escape closes. Active pledge committee members and executive board members can switch to Edit mode to change each section directly. Save or discard drafts before changing slides or modes.
 
 ### The presentation write-up
 
 | | Interview note | Presentation write-up |
 | --- | --- | --- |
-| Storage | Per author/candidate/round | One shared row per rushee |
-| Editing | Own attributed note | Eboard or pledge chair |
-| Length cap | 6000 | 3000 |
+| Storage | Per author/candidate/round | Four shared sections per rushee; legacy plain-text fallback |
+| Editing | Own attributed note | Executive board or active pledge committee member |
+| Length cap | 6000 | 30,000 HTML characters per section; 3000 for legacy plain text |
 | Purpose | Restricted evaluation | Prepared chapter discussion |
 
-`PresentationTab.jsx` shows written/blank status for the roster. Clearing uses DELETE rather than an empty saved body. Ordinary pledge-committee members can read the presentation; `can_edit_presentation` controls editing.
+`PresentationTab.jsx` lists the rushees with Edit slide and Present buttons. The API supplies `can_edit_presentation`. Each section has separate saving, formatting and version checks. A deliberately empty saved section remains blank; legacy plain-text clearing still uses DELETE.
 
 The same components must be reachable from the member-side rush-data page for eligible pledge-committee users and from the admin page for eboard.
 
@@ -317,3 +317,6 @@ For timed member voting from the presentation, see [Decision-night voting](./dec
 
 
 Interviewer signup is available at `/member/interviews`; executive board members use the Sign Up tab at `/admin/interviews`. The member link does not require pledge committee membership. No alumni or pledge interviewer pages are provided.
+
+
+Decision-night presentation now has separate Edit and Presentation modes with four independently saved formatted sections. The interview section is a curated summary, not an automatic copy of private interview notes. See [slide editing and live flags](./decision-night.md#slide-layout-and-editing) for the current workflow and migration requirements.
