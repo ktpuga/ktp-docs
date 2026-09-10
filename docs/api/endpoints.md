@@ -1795,6 +1795,8 @@ To investigate an error:
 3. Check whether the API was reached. `apiStatus: null` means the website received no API response.
 4. Use the API stage, auth error, and refusal reason to distinguish credential failures from attendance rules. Compare timings and bucket offsets when the code expired.
 
+For delays before the API call, the website records bounded browser timings and session/refresh trace IDs. See [website timing diagnostics](../website/sign-in.md#timing-before-a-check-in-submission). These are diagnostic values and do not change API authorization or code validity.
+
 Do not copy bearer tokens or QR URLs into diagnostic notes. Completion logs cannot capture a process crash or a request that never finishes.
 
 Deploy the website and API correlation changes together. They require no schema migration or Authentik configuration change. The credential-forwarding repair addresses a reproduced defect; confirming the cause of the historical incident still requires production evidence.

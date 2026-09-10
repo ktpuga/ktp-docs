@@ -193,4 +193,36 @@ The accessor is for writable Server Actions/Route Handlers, not Server Component
 
 Missing/failed sessions and API `401` responses redirect check-in to login with an allowlisted return path. An attendance code may expire during login; authentication does not extend its validity. Normal `403` refusals reach the check-in screen as messages. Unexpected failures return a safe message with an attempt reference.
 
+The website also measures the earlier session request and actual refresh operation. See [Timing before a check-in submission](#timing-before-a-check-in-submission).
+
 Correlated website/API `[checkin_attempt]` records distinguish credential, transport, attendance-rule, and write failures. Current callbacks refresh on imminent expiry or claims older than three minutes when invoked. A one-hour provider lifetime alone does not establish that the historical incident is resolved.
+
+### Timing before a check-in submission
+
+The check-in page waits for `useSession()` before calling its Server Action. The session endpoint can refresh a token during that wait, so the action's `authMs` alone does not measure the whole authentication path.
+
+`[checkin_attempt].clientTiming` contains only allowlisted elapsed durations in milliseconds, bounded to one hour. Missing or invalid values are null. They are browser-reported diagnostics, never attendance authorization:
+
+| Field | Measures |
+| --- | --- |
+| `navigationToMountMs` | Document navigation to the check-in component's first effect, only when the navigation path matches the current scan |
+| `mountToSessionReadyMs` | First effect to the first authenticated session observed for this scan |
+| `mountToDispatchMs` | First effect to calling the check-in action |
+| `navigationToDispatchMs` | Document navigation to dispatch, when the navigation path matches |
+| `sessionRequestMs` | Duration of the most recent completed same-origin `/api/auth/session` resource |
+| `sessionRequestAgeMs` | Time since that resource completed, so an old session request is not mistaken for a new one |
+| `sessionTraceId` | Opaque ID from that session response's `Server-Timing` header, if the browser exposes it |
+
+The timer survives the attempt remount when session loading reveals the account ID. A new event/code starts a new timer. URLs and resource names are inspected only in the browser and are not included in the payload.
+
+The website auth route logs `[auth_session]` with `traceId`, HTTP status and total handler time. Its `Server-Timing` header lets the page associate that response with the record without changing the response body or session cookies. Other auth endpoints pass through unchanged.
+
+Actual refresh operations log `[auth_refresh]` start and complete records with a `refreshId`, source (`session`, `checkin`, or `other`), trace ID, reason (`expired` or `claims_stale`), token-request time, total time, HTTP status, and allowlisted provider error. A reuse record links a caller to the original refresh operation instead of claiming another token request ran. For source `checkin`, the trace ID is the attempt reference; for source `session`, it is the session trace ID. A start without completion can help locate unfinished work.
+
+To investigate a refusal:
+1. Find its existing attempt reference in both website and API logs.
+2. Compare browser navigation/session wait with the action's `authMs`, `apiMs` and `totalMs`.
+3. Follow `clientTiming.sessionTraceId` to `[auth_session]` and its refresh records. A resource's presence does not itself prove it delayed submission or changed credentials.
+4. Compare the API's bucket offset and refusal reason. Short action times do not establish that the scanned code was fresh.
+
+These measurements do not capture camera-to-link time, a previous document before a login redirect, or all queue/network time before the Server Action starts. Resource Timing entries can be missing or evicted. Client values and trace IDs are untrusted diagnostics; do not infer identity from them. No tokens, cookies, raw QR values, arbitrary provider payloads or full URLs are added to these logs.
