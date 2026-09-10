@@ -1802,3 +1802,19 @@ Do not copy bearer tokens or QR URLs into diagnostic notes. Completion logs cann
 Deploy the website and API correlation changes together. They require no schema migration or Authentik configuration change. The credential-forwarding repair addresses a reproduced defect; confirming the cause of the historical incident still requires production evidence.
 
 ---
+
+
+## Decision-night voting
+
+All routes require bearer authentication. See [Decision-night voting](../website/decision-night.md) for the presenter procedure, eligibility and privacy rules. Responses use `Cache-Control: private, no-store`.
+
+| Method | Route | Access and response |
+| --- | --- | --- |
+| GET | `/decision-night/current` | Eligible voters: server time, active rushee name/photo/major, deadline, own selection and capability flags. After closure, no rushee data; own last vote confirmation only. |
+| POST | `/decision-night/rounds` | Executive board or pledge chair: `{candidate_id, seconds, request_id}`. UUID request ID makes retries return the same round. Duration must be an integer from 15 to 300 seconds. |
+| PUT | `/decision-night/rounds/:id/vote` | Eligible voters: `{choice}` only. Choices: `strong_yes`, `weak_yes`, `undecided`, `weak_no`, `strong_no`. One ballot per authenticated voter per round, editable until close. |
+| POST | `/decision-night/rounds/:id/close` | Executive board or pledge chair: close early; repeat calls are safe. |
+| GET | `/decision-night/rounds` | Executive board or pledge chair: most recent 100 rounds and vote counts. |
+| GET | `/decision-night/rounds/:id/results` | Executive board or pledge chair: totals and attributed votes for that round. |
+
+The API rejects a second active round with `409 round_already_open`, late voting with `409 voting_closed`, and invalid open-request reuse with `409 request_conflict`. Validation errors are 400, missing candidates/rounds are 404, and permission failures are `403 decision_night_forbidden`. No client-supplied voter identity or deadline is accepted. Management permission is checked on every request. The website proxy rejects cross-origin writes and forwards only the listed paths.

@@ -311,3 +311,6 @@ An omitted `interviewer_committee_ids` leaves targeting unchanged; an empty arra
 ## Not built
 
 The recorded UI does not include a manager picker for assigning interviewers even though the endpoint accepts a target user. Ratings, waitlists, automatic staffing, interview reminders, and recurring/bulk slot generation are also not part of this flow. Slot chaining reduces repeated entry without creating a bulk API.
+
+
+For timed member voting from the presentation, see [Decision-night voting](./decision-night.md). Voting does not expose private interview notes.
