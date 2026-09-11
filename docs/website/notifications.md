@@ -24,6 +24,13 @@ Files & Photos no longer has a badge.
 
 Most new-content counts compare visible records with a per-user tab cursor, `last_seen_at`. Opening the tab advances the cursor. Pending-action counts use different rules and do not clear on a visit.
 
+### Keeping committee counts current
+
+Approving or denying a join request refreshes the request list, committee activity counts, and navigation badges after the server responds. Opening a committee also refreshes navigation counts after marking its content read. Pending requests remain counted until they are handled.
+
+While the tab is visible, the open request list and committee activity refresh every 30 seconds. They also refresh when the user returns to the tab, so changes made by another administrator appear without reloading the page. Request-list polling pauses during an approval or denial. The navbar already follows the same 30-second and return-to-tab schedule.
+
+These updates refresh data in place. They do not reload the page or change session permissions. If a count remains wrong after a successful refresh, inspect the server response rather than treating it as a browser refresh issue.
 ### Nothing is retroactively unread
 
 Missing cursors initialize to the current time, so existing content does not become unread at first use. This does not apply to pending invitations, committee activity, or moderation queues; those counts can be nonzero on the first visit.
