@@ -336,3 +336,11 @@ The member Interviews link appears only when an API-eligible round has an unende
 Executive board members and the pledge chair can open a round in interview setup and select **Preview as rushee** beside **Publish to rushees**. A read-only panel shows that round using the actual candidate schedule layout: dates, times, descriptions, locations, and current seat availability. Drafts are marked **Preview: not published**.
 
 The preview represents a rushee who has not booked yet. It does not impersonate an account, fetch the rushee's available-round list, display interviewer or candidate identities, or permit booking/cancellation. Opening or closing it does not change publication. Actual rushees still cannot access a draft. The existing manager-only schedule endpoint supplies the data; no new public draft endpoint exists.
+### Parallel interviews by location
+
+Member interviewer signup and executive board Sign Up/Set Up group each day's slots by location. Locations are listed alphabetically, and times are sorted within each location. A slot uses its own location, then the round's location if none is set; otherwise it appears under **Location not set**. Each location heading stays visible while scrolling through that section inside the existing day scroll area. Slot assignments and actions are unchanged. Rushee booking and draft preview use the compact timetable described below.
+### Rushee interview timetable
+
+Rushee booking and **Preview as rushee** use a compact timetable. Day buttons show one day at a time; location columns separate parallel interviews, and each row shows the start and end time. On phones a location selector shows one room at a time. Day controls stay outside the scrollable table, and room headings remain visible while scrolling.
+
+Available cells show **Select**, full slots stay disabled, and an empty time/location combination reads **No slot**. Multiple seats show the remaining count. Separate records with the same time and room are kept as separate buttons, each booking its original slot. Locations use the slot value, then the round location, then **Location not set**. Existing booking confirmation, cancellation, and read-only preview protections remain unchanged. Interviewer signup and management keep their day columns and room sections.
