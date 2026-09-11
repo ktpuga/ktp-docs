@@ -102,7 +102,7 @@ The embedded `app/studio/[[...tool]]/page.jsx` route was removed. Sanity configu
 
 The migration record says Studio had not been published separately. Check the current project before assuming a hosted editor exists.
 
-The blog still reads content through production Sanity client dependencies. Moving Studio packages to devDependencies does not by itself prove they are absent from every build stage or eliminate build-tool risk.
+The public blog routes were subsequently removed, along with the footer link and sitemap entry. Stored Sanity content and tooling remain. Moving Studio packages to devDependencies does not by itself prove they are absent from every build stage or eliminate build-tool risk.
 
 ### `sanity/lib/live.ts` was deleted
 

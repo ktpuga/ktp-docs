@@ -322,3 +322,17 @@ Interviewer signup is available at `/member/interviews`; executive board members
 Decision Night uses full candidate names and a smaller photo. Events attended and the protected resume popup sit in the profile column. Open editing from the portal; the projected presentation has no mode switch. The slide and timer follow the portal theme. See [Decision Night](decision-night.md) for visibility and voting controls.
 
 Decision-night presentation now has separate Edit and Presentation modes with three independently saved formatted sections and a read-only attendance list. The interview section is a curated summary, not an automatic copy of private interview notes. See [slide editing and live flags](./decision-night.md#slide-layout-and-editing) for the current workflow and migration requirements.
+
+### Interview slots by day
+
+Member interviewer signup and the executive board Sign Up and Set Up tabs display interview days in separate columns: one on phones, two on medium screens, and three on wide screens. Additional days wrap to another row. Each day has a date heading, slot count, and its own scrollable list capped at 60% of the viewport height or 36rem, whichever is smaller. The date stays visible while scrolling, and the list can be focused for keyboard scrolling.
+
+Signup, withdrawal, bookings, notes, and schedule-management actions keep their existing permissions. Slot-edit fields fit the day column. This layout does not generate slots or copy schedules between dates.
+### Interview navigation visibility
+
+The member Interviews link appears only when an API-eligible round has an unended slot with interviewer capacity available, or the member already has an interviewer assignment. Existing assignments keep the link available for notes. Empty rounds, full unassigned slots, expired unassigned slots, and rounds outside the user's selected groups or committees do not expose the link. The check refreshes every 30 seconds while visible, on return to the tab, and when the session or preview identity changes. Executive board members retain their setup link to create and manage slots.
+### Preview an unpublished interview round
+
+Executive board members and the pledge chair can open a round in interview setup and select **Preview as rushee** beside **Publish to rushees**. A read-only panel shows that round using the actual candidate schedule layout: dates, times, descriptions, locations, and current seat availability. Drafts are marked **Preview: not published**.
+
+The preview represents a rushee who has not booked yet. It does not impersonate an account, fetch the rushee's available-round list, display interviewer or candidate identities, or permit booking/cancellation. Opening or closing it does not change publication. Actual rushees still cannot access a draft. The existing manager-only schedule endpoint supplies the data; no new public draft endpoint exists.
