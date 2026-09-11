@@ -173,3 +173,17 @@ The documented login flow does not force existing users through a password reset
 3. Send the link to that user.
 
 New users set a password during enrollment and do not need a separate recovery step.
+
+## Portal session freshness
+
+Visible portal tabs check the Auth.js session every 60 seconds. Polling pauses when the tab is hidden and when the browser reports it is offline. Auth.js also keeps its existing refresh-on-return behavior. Public pages and check-in pages do not receive the periodic portal poll.
+
+The existing server callback renews group claims when they are more than three minutes old. With a working refresh token and current groups returned by Authentik, an active portal normally picks up a group change in roughly three to four minutes. This is not an immediate-delivery guarantee. Legacy sessions without refresh tokens, omitted group claims, or provider failures can delay the change.
+
+Rushee Data and Reports navigation permissions are checked again when the session groups or preview identity change, every minute while visible, and when returning to the tab. Older responses cannot restore a previous identity's permission. Failed permission reads hide the affected link.
+
+Routine polling does not reload the page. If updated groups no longer permit the current portal, client navigation moves the member to their permitted portal. This can leave the current form, so permissions removed during editing are not treated as an ordinary data refresh. Executive board portal previews retain their existing exception; a preview cookie does not grant that exception after executive board access is removed.
+
+This is a website freshness change, not immediate API token revocation. General API role checks can still accept roles from an older valid token. API revocation and stale user-sync protection require a separate change. No token lifetime, QR validity, or API authorization rule is changed here.
+
+Regression checks: `node --test scripts/test-session-freshness.cjs scripts/test-platform-auth.cjs scripts/test-proxy-auth.cjs` in the website repository.
