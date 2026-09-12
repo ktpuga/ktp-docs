@@ -325,7 +325,7 @@ Decision-night presentation now has separate Edit and Presentation modes with th
 
 ### Interview slots by day
 
-Member interviewer signup and the executive board Sign Up and Set Up tabs display interview days in separate columns: one on phones, two on medium screens, and three on wide screens. Additional days wrap to another row. Each day has a date heading, slot count, and its own scrollable list capped at 60% of the viewport height or 36rem, whichever is smaller. The date stays visible while scrolling, and the list can be focused for keyboard scrolling.
+Member interviewer signup and the executive board Sign Up and Set Up tabs display interview days in separate columns: one on phones, two on medium screens, and three on wide screens. Additional days wrap to another row. Each day has a date heading, slot count, and its own scrollable list capped at 85% of the viewport height. The date stays visible while scrolling, and the list can be focused for keyboard scrolling.
 
 Signup, withdrawal, bookings, notes, and schedule-management actions keep their existing permissions. Slot-edit fields fit the day column. This layout does not generate slots or copy schedules between dates.
 ### Interview navigation visibility
@@ -343,4 +343,14 @@ Member interviewer signup and executive board Sign Up/Set Up group each day's sl
 
 Rushee booking and **Preview as rushee** use a compact timetable. Day buttons show one day at a time; location columns separate parallel interviews, and each row shows the start and end time. On phones a location selector shows one room at a time. Day controls stay outside the scrollable table, and room headings remain visible while scrolling.
 
-Available cells show **Select**, full slots stay disabled, and an empty time/location combination reads **No slot**. Multiple seats show the remaining count. Separate records with the same time and room are kept as separate buttons, each booking its original slot. Locations use the slot value, then the round location, then **Location not set**. Existing booking confirmation, cancellation, and read-only preview protections remain unchanged. Interviewer signup and management keep their day columns and room sections.
+Available cells show a filled **Book** button, full slots stay disabled, and an empty time/location combination reads **No slot**. Multiple seats show the remaining count. Separate records with the same time and room are kept as separate buttons, each booking its original slot. Locations use the slot value, then the round location, then **Location not set**. Existing booking confirmation, cancellation, and read-only preview protections remain unchanged. Interview management keeps its day columns and room sections. Member signup uses the timetable described below.
+### Member interviewer timetable
+
+Member signup and executive board **Sign Up** use the same day selector, location columns, and mobile location selector as rushee booking. Member cells retain staffing counts, interviewer names, candidate details, signup/withdraw controls, and existing interview-note access. Only the presentation is shared; role permissions and actions remain separate. Switching days keeps the member panels mounted so unsaved note drafts survive the switch. Closing a note editor or leaving the page retains its existing behavior. Executive board **Set Up** keeps its day columns and location sections.
+### Correcting interview locations
+
+In interview setup, **Change locations** lets executive board members and the pledge chair replace one existing room or update all slots in the selected round. The form shows the affected count and asks for confirmation. Slots already at the replacement location are skipped. Matching includes slots inheriting the round's default location. After successful slot updates, the default is also changed when applicable.
+
+The operation uses the existing permission-checked slot update action and sends only the location field. Times, capacities, bookings, and interviewer assignments remain intact. Updates run sequentially, not as one database transaction. If an update fails, the operation stops, reports the number of confirmed changes, and reloads the schedule for review. Keep the page open while it runs. Room-only changes do not currently send notifications; contact affected people separately if needed.
+
+Candidate and member timetables use alternating row shading. After a rushee books successfully and the data refreshes, the table is replaced by the existing booking confirmation card with the chosen time and location.
