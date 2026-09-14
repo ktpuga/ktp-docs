@@ -109,6 +109,20 @@ Candidate-facing queries omit those name lists. `mine` refers to a candidate boo
 
 `DELETE /interviews/slots/:id/interviewers/:userId` permits self-withdrawal or removal by a manager. Removal by someone else triggers the applicable notification.
 
+### Slots that need covering
+
+A slot is marked as needing coverage when a rushee has booked it and no interviewer has signed up: `booked_count > 0` and an empty `interviewers` array. `lib/interview-coverage.js` holds the single definition, and the three places that display it all read from that module rather than restating the condition.
+
+The marker appears on the slot row in the executive board setup view, on the member sign-up card, and as a count above the round ("3 slots need covering"). The count is derived from the same predicate as the badges, so a summary can never disagree with the number of marked rows below it.
+
+Deliberately narrow. A slot with fewer interviewers than its `interviewer_capacity` is staffed, not uncovered, and is not marked. The row already states "1 of 2 interviewers" in words, and flagging partial staffing would fire on most of a round and train people to ignore the badge. The case being marked is a candidate arriving to an empty room.
+
+A slot whose `interviewers` key is absent entirely is treated as unknown and is NOT marked, where one carrying an empty array is. Both projections these pages read do select the key, so the absent case should not occur; it is handled explicitly because `(undefined ?? []).length === 0` is true, and a payload that lost the key would otherwise paint the warning across every booked slot in the round.
+
+Past slots still count. An uncovered slot that has already happened is a rushee who met nobody, which is something to see afterwards rather than hide.
+
+This requires no API change. `booked_count` and `interviewers` already ride on every slot projection both pages read, including the member-facing `getInterviewerSchedules`.
+
 ## Drafts and publishing
 
 Rounds begin as drafts. The UI requires at least one slot before publishing. Unpublished rounds accept eligible interviewer claims, but remain hidden and unavailable for new rushee bookings. Unpublishing does not stop interviewer signup.
