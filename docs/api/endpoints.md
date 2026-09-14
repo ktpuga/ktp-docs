@@ -733,11 +733,39 @@ Returns one rushee's profile, booking details, presentation note, and recorded a
 
 `interview` and `presentation` are null when absent. `attended_events` is always an array, ordered oldest first, and includes only `status = 'present'`. An empty list can mean attendance was not recorded; it does not establish that the rushee attended no events.
 
+`rushee` carries both `profile_picture_asset_id` and `headshot_asset_id`. The panel compares them to say whether the committee's interview headshot is currently on display or is stored behind a picture the rushee uploaded; one column cannot express that. See Interview headshots below.
+
 The lookup applies the same rushee, test-account, and deletion filters as the table. Other user IDs return `404` rather than exposing a member's private profile fields.
 
 Interview notes are fetched separately by the rushee's `authentik_id` through the `InterviewNotes` component, which takes a `candidateId`. It took a `booking_id` until 2026-09-14; that address made a cancelled rushee's notes unreachable even though the rows survived, so the panel is addressed by person now and shows every round.
 
 Show that panel only when the server returns `can_view_notes: true`. The flag uses the interview controller's permission predicate, which is eboard or the pledge committee, and is **no longer gated on the rushee having an interview** - that condition was the last thing hiding the notes of somebody who cancelled. It is still published and still branched on, because the two rules live in separate files and may diverge again.
+
+### Interview headshots
+
+**Eboard or any pledge committee member**, the same audience as the rest of this controller. The rushee filter applies to every one of these, so the URL cannot name a member, an alumnus or an executive board account.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `PUT` | `/rush-data/:id/headshot` | multipart, field `file`. Returns `{ headshot_asset_id, profile_picture_asset_id, is_profile_picture }` |
+| `DELETE` | `/rush-data/:id/headshot` | Removes it, reverting the avatar only if the headshot was what was showing |
+| `GET` | `/rush-data/:id/headshot/media` | Streams the committee's photo. `404` when none is set |
+
+Every rushee has their picture taken when they interview and almost none set a profile picture, so the directory, the roster and the decision-night slides showed initials for exactly the people the chapter was trying to recognise.
+
+**Two columns, and both are needed.** `users.headshot_asset_id` is what the committee uploaded; `users.profile_picture_asset_id` is what is shown. Added by migration `1791500000000`.
+
+On upload the API writes the headshot always, and copies it into `profile_picture_asset_id` **only where the rushee has none of their own**. That is what makes a dozen existing projections render the headshot with no change to any of them, and it is why "the rushee's own upload wins" needs no rule: `PUT /users/me/profile-picture` overwrites the avatar and never looks at the headshot column.
+
+Replacing a headshot that is currently the avatar moves both, so a corrected photo does not leave the old one on the directory. Replacing one that sits behind the rushee's own picture moves only the headshot.
+
+`is_profile_picture` is derived from comparing the two ids rather than stored, so it cannot disagree with them. Clients must not re-derive it: the panel's job is to say accurately whether the photo is on display or stored behind one the rushee uploaded, and those two states look identical otherwise.
+
+Deletion clears `profile_picture_asset_id` **only when it still equals the headshot**. A rushee who has since uploaded their own keeps it. The Immich asset itself is deliberately not deleted, matching every other asset reference here.
+
+The upload reuses the member-avatar pipeline, so it accepts what a phone produces (HEIC, AVIF, TIFF and the rest) up to 25 MB and re-encodes to a downscaled JPEG. That strips EXIF, including the GPS coordinates of wherever the interview happened.
+
+**Known gap:** `headshot_asset_id` is not in `archiveModel`'s `SNAPSHOT_COLUMNS`, so archiving a rushee does not preserve it. Closing that needs a column on the archive database, which has its own schema file and no migration runner.
 
 ### `PUT /rush-data/:id/presentation`
 

@@ -115,6 +115,22 @@ A database constraint limits `resume_mime` to the accepted types, alongside the 
 
 Both include a Presentation tab and link to a per-candidate profile at the corresponding `/[id]` route. See [Interviews](./interviews.md#the-presentation-write-up).
 
+### Interview headshots
+
+`components/rush/RusheeHeadshot.jsx` is a card on the per-candidate profile, open to the same audience as the page itself: eboard and the pledge committee. Upload, replace, remove.
+
+Every rushee has their picture taken when they interview and almost none set a profile picture, so the directory, the roster and the decision-night slides showed a wall of initials for exactly the people the chapter was trying to put a face to.
+
+**It fills a gap rather than overriding a choice.** The API stores the headshot in its own column and copies it into the rushee's profile picture only when they have none of their own. If the rushee later uploads their own, that ordinary upload replaces the avatar everywhere and the headshot stays on file behind it.
+
+The panel says which of those two states it is in, because they look identical otherwise: the same image and the same buttons, but one is on every screen in the portal and the other is stored and invisible. That flag comes from the API, which derives it by comparing the two asset ids. Do not re-derive it in a component; a second copy could disagree with the server, and this is what somebody reads before uploading a photograph of another person.
+
+The image URL is cache-busted on the asset id. The media route is keyed on the rushee, whose id does not change when the photo does, so without it a replaced headshot shows the old picture until a hard refresh. That is the media-cache trap, already reported once as a bug on the avatar route.
+
+Removal warns differently depending on the state: removing the visible photo sends the rushee back to initials, while removing a stored one changes nothing the chapter can see.
+
+Streaming goes through `app/api/rush-data/[id]/headshot/media`, deliberately separate from the profile-picture proxy. The audiences differ, and so do the pictures. See [the endpoints](../api/endpoints.md#interview-headshots).
+
 ### Events attended
 
 The profile lists events with a present attendance record, oldest first. Excused, absent, and unmarked rows are omitted.
