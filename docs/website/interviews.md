@@ -224,11 +224,19 @@ Do not add notes to the shared booking projection used by broad interviewer sche
 
 The global audit middleware records note mutations. Note `body` is not in `SAFE_SUMMARY_KEYS`, so content is excluded. Check that new note fields do not accidentally use an allowlisted summary key.
 
-### Bullets, and where the structure lives
+### Rich text, and where the structure lives
 
-`body` remains text. `lib/interview-note-format.js` renders lines beginning with `-`, `*`, or `•` as bullets, with at most two levels. Unmarked lines render as paragraphs.
+Notes are written in the same rich-text editor as decision-night slides, changed on 2026-09-14. `components/portal/RichTextEditor.jsx` holds the TipTap instance, the formatting toolbar and the HTML source toggle, and is mounted by both the note panel and `PresentationSectionEditor`. Only the saving differs: a slide section carries an optimistic-concurrency `version` and a conflict path, a note is an upsert keyed on its author.
 
-The editor continues bullets on Enter and indents applicable bullet lines on Tab. Off a bullet, Tab must move focus normally. Apply returned caret positions after the controlled value updates rather than against the old text.
+`body` is still a TEXT column and the schema did not change. What changed is that the string now holds HTML, so the move needed a sanitiser and a higher character cap rather than a migration.
+
+**Sanitised three times.** `sanitize-html` runs in `interviewNoteModel` on write and again on read, and DOMPurify runs in `PresentationHtml` on the way into the DOM. The read-side passes are not redundant: they are what protects against a row written around the API. `interview_notes` holds the most sensitive rows in the product, and it is rendered with `dangerouslySetInnerHTML`.
+
+**`INTERVIEW_NOTE` rose from 6000 to 30000**, matching `PRESENTATION_HTML`. The limit counts stored characters, which are now markup, so the old cap would have bitten at roughly half the writing it used to allow and for reasons invisible to the writer. The website only shows the character counter past 80 percent of the limit, since counting markup the writer never typed is more confusing than helpful.
+
+**An emptied editor submits `<p></p>`**, which is seven characters and satisfies a plain `required` check. Both the API and the website strip tags and require the remainder to be non-empty, so a blank note is refused rather than stored as a row that renders as nothing.
+
+The previous plain-text format is superseded. `lib/interview-note-format.js` still exports `parseNoteBody` for `NoteBody`, whose only remaining caller is the legacy plain-text decision-night write-up (`rushee_presentations.body`); its `bulletKeyDown` typing helper has no callers left.
 
 ### Decision night
 
@@ -244,9 +252,9 @@ Presentation mode is read-only. Arrow keys or Space advance, and Escape closes. 
 
 | | Interview note | Presentation write-up |
 | --- | --- | --- |
-| Storage | Per author/candidate/round | Four shared sections per rushee; legacy plain-text fallback |
+| Storage | Per author/candidate/round, sanitised HTML | Four shared sections per rushee, sanitised HTML; legacy plain-text fallback |
 | Editing | Own attributed note | Executive board or active pledge committee member |
-| Length cap | 6000 | 30,000 HTML characters per section; 3000 for legacy plain text |
+| Length cap | 30,000 HTML characters | 30,000 HTML characters per section; 3000 for legacy plain text |
 | Purpose | Restricted evaluation | Prepared chapter discussion |
 
 `PresentationTab.jsx` lists the rushees with Edit slide and Present buttons. The API supplies `can_edit_presentation`. Each section has separate saving, formatting and version checks. A deliberately empty saved section remains blank; legacy plain-text clearing still uses DELETE.
@@ -323,7 +331,7 @@ Omitting either targeting field preserves its current value. An empty array clea
 | `MAX_SLOTS_PER_SCHEDULE` | 500 |
 | Title | 150 |
 | Description | 2000 |
-| `INTERVIEW_NOTE` | 6000 |
+| `INTERVIEW_NOTE` | 30000 |
 | `PRESENTATION_NOTE` | 3000 |
 
 ## Not built
