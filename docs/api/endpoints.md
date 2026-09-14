@@ -660,7 +660,7 @@ Register `/access` and `/presentation` before `/:id` in `routes/rushData.js`.
 | Rushee profile, interest form, and GPA | Eboard or any pledge committee member |
 | Decision-night deck | Eboard or any pledge committee member |
 | Write a presentation note | Eboard or the pledge committee chair |
-| Read interview notes | Eboard, pledge committee chair, or pledge committee members who ran that rushee's slot |
+| Read interview notes | Eboard, or any pledge committee member (changed 2026-09-14; previously also required running that rushee's slot) |
 
 Rushees cannot read interview notes, including their own. Keep the member-group gate on notes routes and do not add notes to rushee-facing profile responses.
 
@@ -735,7 +735,7 @@ Returns one rushee's profile, booking details, presentation note, and recorded a
 
 The lookup applies the same rushee, test-account, and deletion filters as the table. Other user IDs return `404` rather than exposing a member's private profile fields.
 
-Interview notes are fetched separately by `booking_id` through the existing `InterviewNotes` component. Show that panel only when the server returns `can_view_notes: true`. The flag uses the interview controller's permission predicate.
+Interview notes are fetched separately by `booking_id` through the existing `InterviewNotes` component. Show that panel only when the server returns `can_view_notes: true`. The flag uses the interview controller's permission predicate. Since 2026-09-14 that predicate and the profile's own rule coincide, both being eboard or the pledge committee, so the flag is true whenever a caller reached the profile and the rushee has a booking. It is still published and still branched on, because the two rules live in separate files and may diverge again.
 
 ### `PUT /rush-data/:id/presentation`
 

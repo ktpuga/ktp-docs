@@ -178,11 +178,15 @@ Deleting an author's account retains their evaluations and stored `author_name`.
 
 | Access | Caller | Result |
 | --- | --- | --- |
-| `all` | Eboard, pledge chair, or qualifying pledge-committee interviewer for the candidate | Candidate notes allowed by the query |
-| `own` | An existing note author who no longer qualifies for wider access | Own note only |
+| `all` | Eboard, or any pledge committee member | Every note on the candidate |
+| `own` | An existing note author who has since left the pledge committee | Own note only |
 | None | Other callers | Refused |
 
-Ordinary wider access requires both pledge-committee membership and candidate-specific access. Being designated to conduct a round through another committee alone does not grant note access.
+Wider access is pledge committee membership and nothing else, for reads and for writes alike. This changed on 2026-09-14. It previously required both committee membership and candidate-specific access through the slot the candidate booked, so an ordinary member saw only the notes on people they personally interviewed. The committee votes on these candidates together, so it now reads the evaluations together.
+
+Being designated to conduct a round through another committee still does not grant note access. `interview_schedules.interviewer_committee_ids` lets the executive board assign any committee to run a round, and without the membership requirement that committee would read every note about the candidates they met. Such a person can conduct an interview and cannot write it up; add them to the pledge committee rather than widening this further.
+
+Withdrawing from a slot no longer narrows access. Leaving the pledge committee is now the only route to the `own` tier, and it exists because membership is revocable while authorship is not: someone who leaves keeps their own words and loses everyone else's.
 
 `GET` returns `{ access, notes }`. Render the access level so an own-only result is not presented as the candidate's complete evaluation set.
 
@@ -275,7 +279,7 @@ Member-group gate plus note-specific authorization:
 | `GET` | `/interviews/bookings/:id/notes` | `{ access, notes }` |
 | `PUT` | `/interviews/bookings/:id/notes` | Save own `{ body }` |
 | `DELETE` | `/interviews/notes/:noteId` | Delete an authorized note |
-| `GET` | `/interviews/schedules/:id/notes` | Manager's round-note view; not the projected deck |
+| `GET` | `/interviews/schedules/:id/notes` | Round-note view, eboard or any pledge committee member; not the projected deck |
 
 Keep the narrower route checks even though the router already authenticates callers. The router also admits rushees.
 
