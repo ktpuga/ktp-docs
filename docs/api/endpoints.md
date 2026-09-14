@@ -735,7 +735,9 @@ Returns one rushee's profile, booking details, presentation note, and recorded a
 
 The lookup applies the same rushee, test-account, and deletion filters as the table. Other user IDs return `404` rather than exposing a member's private profile fields.
 
-Interview notes are fetched separately by `booking_id` through the existing `InterviewNotes` component. Show that panel only when the server returns `can_view_notes: true`. The flag uses the interview controller's permission predicate. Since 2026-09-14 that predicate and the profile's own rule coincide, both being eboard or the pledge committee, so the flag is true whenever a caller reached the profile and the rushee has a booking. It is still published and still branched on, because the two rules live in separate files and may diverge again.
+Interview notes are fetched separately by the rushee's `authentik_id` through the `InterviewNotes` component, which takes a `candidateId`. It took a `booking_id` until 2026-09-14; that address made a cancelled rushee's notes unreachable even though the rows survived, so the panel is addressed by person now and shows every round.
+
+Show that panel only when the server returns `can_view_notes: true`. The flag uses the interview controller's permission predicate, which is eboard or the pledge committee, and is **no longer gated on the rushee having an interview** - that condition was the last thing hiding the notes of somebody who cancelled. It is still published and still branched on, because the two rules live in separate files and may diverge again.
 
 ### `PUT /rush-data/:id/presentation`
 
@@ -1742,7 +1744,13 @@ Request body:
 }
 ```
 
-The callback removes the user's row from `users`. Configure the Authentik notification rule as follows:
+**The callback ARCHIVES the user, then removes their row from `users`.** It ran a bare `DELETE` until 2026-09-14, and `interview_notes.candidate_id` is `ON DELETE CASCADE`, so deleting a rushee's Authentik account destroyed every interview note written about them. It now calls the same `archiveModel.archiveUser` path eboard's archive button uses, which snapshots rush history into the archive database before deleting.
+
+**No snapshot, no delete.** The webhook answers `500` and leaves the row alone when the archive write fails, when `ARCHIVE_DATABASE_URL` is unset, or when the local row is soft-deleted (`archiveUser` filters on `deleted_at IS NULL` and returns null for it). Authentik retries. A `pk` this database has never seen answers `200`, since that is an ordinary event and not a failure to retry forever.
+
+The operational consequence is deliberate: while the archive database is unreachable or unconfigured, Authentik deletions are **not applied here** and the two systems disagree until it is fixed. That was chosen over deleting anyway to stay in sync, which would destroy the notes this change exists to protect. Watch for `[webhook] REFUSING TO DELETE` in the API logs.
+
+Configure the Authentik notification rule as follows:
 
 1. Set a Group or enable "Send notification to event user." A rule with neither does not send the notification.
 2. In the bound Event Matcher Policy, leave App blank. Set Action to `Model Deleted` and Model to `User (authentik_core)`. The App field matches `event.app`, not `event.context.model.app`.

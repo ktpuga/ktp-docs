@@ -182,6 +182,16 @@ Notes are attributed evaluations with separate authors. They are not the shared 
 
 Storage keys use `schedule_id` and `candidate_id`. A nullable `booking_id` records provenance with `ON DELETE SET NULL`.
 
+**The READ ADDRESS became the candidate on 2026-09-14, and the gap it closed is worth stating.** Storage was always candidate-anchored, so cancelling an interview never destroyed a note. What it destroyed was the only way to ask for one: the panel took a booking id, and the profile obtained that from the candidate's CURRENT booking. A rushee who cancelled without rebooking had notes that still existed in Postgres and were unreachable through the API. The rows survived and the door did not.
+
+`GET /interviews/candidates/:id/notes` returns every round that candidate has notes in, newest first, each group carrying its own `schedule_title`. `can_view_notes` on the rushee profile is no longer gated on there being an interview either; it was the last thing hiding them.
+
+**`writable_rounds` is a different list from `rounds`.** It is every round a note could be attached to, with `booked` flagging the one the candidate actually sat in. A candidate nobody has written about yet has no note groups and still needs a composer. It comes back EMPTY for an `own`-tier caller, who may read their own words and may not write new ones, so the client never renders a round picker above a composer that would be refused.
+
+**Writing names the round explicitly.** Notes key on `(schedule_id, candidate_id, author_id)`, so a write must say which round it belongs to, and `PUT` requires `schedule_id` rather than deriving one. The user chose this over a server-side fallback chain: a guess is invisible when it is wrong, and "which interview is this about" is not a question the server can answer for a candidate who cancelled. Every round is offered, including ones the candidate never booked, because a rushee discussed at decision night without interviewing is exactly the case the change exists for.
+
+**The booking-addressed pair still works and is still routed.** The API deploys on push while the website deploys nightly, so removing them in the same change would 404 the notes panel for everyone in between. They can go once the website release carrying the profile panel is live.
+
 This preserves notes when a candidate cancels and rebooks. A booking ID is an API address used to resolve the candidate/round, not the note's lifetime.
 
 ### `author_id` is `ON DELETE SET NULL`, with the name denormalised
@@ -298,8 +308,10 @@ Member-group gate plus note-specific authorization:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/interviews/bookings/:id/notes` | `{ access, notes }` |
-| `PUT` | `/interviews/bookings/:id/notes` | Save own `{ body }` |
+| `GET` | `/interviews/candidates/:id/notes` | `{ access, rounds, writable_rounds }` |
+| `PUT` | `/interviews/candidates/:id/notes` | Save own `{ body, schedule_id }` |
+| `GET` | `/interviews/bookings/:id/notes` | Deprecated, still live. `{ access, notes }` |
+| `PUT` | `/interviews/bookings/:id/notes` | Deprecated, still live. Save own `{ body }` |
 | `DELETE` | `/interviews/notes/:noteId` | Delete an authorized note |
 | `GET` | `/interviews/schedules/:id/notes` | Round-note view, eboard or any pledge committee member; not the projected deck |
 
