@@ -158,6 +158,28 @@ then answers 500s to everything.
 Both poll rather than sleep. Each app is usually up within a second or two, so
 a fixed wait would be either wasted time or too short.
 
+### The API health response also reports the archive database
+
+Since 2026-09-14 `GET /health` carries an `archive` object alongside `database`:
+
+```json
+{ "status": "ok", "database": "ok", "archive": { "status": "ok" } }
+```
+
+`archive.status` is `ok`, `disabled` (no `ARCHIVE_DATABASE_URL`), `unreachable` (set, cannot connect - usually a missing `pg_hba.conf` line) or `no_schema` (connects, but `npm run archive:init` was never run). The three failure states are separate because the fix differs.
+
+**It never fails the gate.** The overall `status` tracks the main database alone. The archive is a second database on no normal request path, so blocking a release over it would stop everything for a subsystem the chapter can go a month without using.
+
+**The probe is bounded at 2 seconds, and that bound keeps the gate honest.** The poll uses `curl --max-time 5`, and a connection to a host that drops packets sits around 11 seconds before Postgres gives up. An unbounded probe would time out every attempt and fail the deploy - the exact outcome that reporting it non-fatally exists to avoid.
+
+Checking a live deployment is therefore one command:
+
+```
+curl -s http://127.0.0.1:4000/health
+```
+
+This matters more than it looks: the Authentik deletion webhook refuses to delete a user it cannot archive first, so a misconfigured archive silently stops user deletions being applied. The boot log says so too - grep `docker logs ktp-api` for `Archive database:`.
+
 ## Why the two schedules differ
 
 An API change usually follows a migration that was just applied by hand, and
