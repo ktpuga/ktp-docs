@@ -32,7 +32,9 @@ interview_schedules
 
 ### `interview_schedules`
 
-A round has a title, optional description/default location, publication state, `interviewer_groups`, and `interviewer_committee_ids`. Matching either a selected group or a selected committee grants interviewer access. Empty selections grant neither; managers have separate access.
+A round has a title, optional description/default location, and publication state. **Who may staff it is not a round setting**: the pledge committee runs interviews, the same for every round, and managers (executive board and the pledge chair) have separate access.
+
+The columns `interviewer_groups` and `interviewer_committee_ids` are still on the table and still hold what previous rushes targeted. Nothing reads them, and the API neither returns nor writes them. They were left rather than dropped so the change is a revert rather than a rebuild if per-round targeting is ever wanted again.
 
 ### `interview_slots`
 
@@ -208,7 +210,7 @@ Deleting an author's account retains their evaluations and stored `author_name`.
 
 Wider access is pledge committee membership and nothing else, for reads and for writes alike. This changed on 2026-09-14. It previously required both committee membership and candidate-specific access through the slot the candidate booked, so an ordinary member saw only the notes on people they personally interviewed. The committee votes on these candidates together, so it now reads the evaluations together.
 
-Being designated to conduct a round through another committee still does not grant note access. `interview_schedules.interviewer_committee_ids` lets the executive board assign any committee to run a round, and without the membership requirement that committee would read every note about the candidates they met. Such a person can conduct an interview and cannot write it up; add them to the pledge committee rather than widening this further.
+Everyone who can conduct an interview can now write it up, because since 2026-09-15 pledge committee membership is what grants both. **This was not true before, and the check is still load-bearing.** `interviewer_committee_ids` let the executive board assign any committee to run a round, so a designated interviewer off the pledge committee could meet a candidate and be refused their notes. Removing per-round targeting closed that gap; the membership requirement was not relaxed and must not be removed for looking redundant, since it is what would refuse a non-member if targeting ever returned.
 
 Withdrawing from a slot no longer narrows access. Leaving the pledge committee is now the only route to the `own` tier, and it exists because membership is revocable while authorship is not: someone who leaves keeps their own words and loses everyone else's.
 
@@ -285,12 +287,24 @@ The router starts with `RUSH_ACCESSIBLE_GROUPS` and narrows individual routes.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/interviews/available` | Published slots and own booking state |
-| `GET` | `/interviews/calendar` | Own booked interviews |
-| `POST` | `/interviews/slots/:id/book` | Claim a candidate seat |
-| `DELETE` | `/interviews/bookings/:id` | Cancel own booking or manage another |
+| `GET` | `/interviews/available` | **Rushees only.** Published slots and own booking state |
+| `GET` | `/interviews/calendar` | Own booked interviews. Open to members |
+| `POST` | `/interviews/slots/:id/book` | **Rushees only.** Claim a candidate seat |
+| `DELETE` | `/interviews/bookings/:id` | Cancel own booking or manage another. Open to members |
 
-Members can read the available sheet; write eligibility remains checked by the endpoint.
+**Only the `rush` group can list or claim a candidate seat.** Members get `403` with `code: "not_a_rushee"`. This corrects an earlier note here saying members could read the available sheet: they could, and a member could book an interview as though they were a candidate, because the router-level gate is `RUSH_ACCESSIBLE_GROUPS` and neither route added anything narrower. No UI ever offered it, which is why it went unnoticed.
+
+`/interviews/calendar` and `DELETE /interviews/bookings/:id` are deliberately left open to members. The first returns only the caller's own bookings and so answers with an empty list for anyone who cannot book; the second is how a no-show gets cleared, and gating it would strand any booking a member already holds.
+
+### Where the Set Up page lives
+
+`components/portal/InterviewsTabs.jsx` is mounted at **both** `/admin/interviews` and `/member/interviews`. The Set Up tab renders only when `GET /interviews/access` answers `can_manage`; everyone else sees the single-tab Sign Up page that was there before.
+
+**This is why the member-side route exists.** The pledge chair is not in the `eboard` group, so `proxy.ts` refuses them all of `/admin` -- and until 2026-09-15 that meant the only Set Up surface in the product was one they could not open, while the API had accepted them on every management route since migration `1789000000000`. The same gap, with the same shape, as the one `RushDataTabs` closes for the decision-night write-up. Do not "consolidate" this back into `/admin`.
+
+One component with a conditional tab, rather than the thin admin/member wrapper pair used by `RusheesTabs` and `RushDataTabs`. That split is right where the tab **sets** differ, as they do there -- eboard gets a Signup Links tab that is theirs alone. Here both portals offer the same two tabs and the only question is whether this person may manage, so two wrappers would be two copies of one tab list kept in step by hand.
+
+The Interviews nav entry is shown when the member has an interviewer slot **or** can manage. Those come apart exactly when it matters: at the start of rush no round exists, so there are no slots, and the one person who needs to create the first one is the one the sidebar would hide it from.
 
 ### Interviewer signup {#interviewer-signup--members-never-rushees}
 
@@ -323,16 +337,17 @@ These routes use `requirePledgeManage`: eboard or pledge chair.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `GET` | `/interviews/access` | `{ can_manage }`, 200 either way |
 | `GET` | `/interviews/schedules` | Rounds including drafts |
-| `POST` | `/interviews/schedules` | Draft from `{ title, description?, location?, interviewer_groups?, interviewer_committee_ids? }` |
+| `POST` | `/interviews/schedules` | Draft from `{ title, description?, location? }` |
 | `GET` | `/interviews/schedules/:id` | Full schedule |
-| `PATCH` | `/interviews/schedules/:id` | Metadata, publication, eligible groups/committees |
+| `PATCH` | `/interviews/schedules/:id` | Metadata and publication |
 | `DELETE` | `/interviews/schedules/:id` | Delete; confirm booked rounds with `force=true` |
 | `POST` | `/interviews/schedules/:id/slots` | `{ starts_at, ends_at, location?, capacity?, interviewer_capacity? }` |
 | `PATCH` | `/interviews/slots/:id` | Edit without reducing below existing claims |
 | `DELETE` | `/interviews/slots/:id` | Delete; confirm booked slots with `force=true` |
 
-Omitting either targeting field preserves its current value. An empty array clears only that selection. `interviewer_groups` accepts `active`, `chair`, and `eboard`; other groups or non-arrays return `400`. Invalid committee IDs also return `400`. Existing rounds keep their committees and begin with no selected groups after migration `1791100000000_add-interviewer-groups.sql`. Apply the migration before the API rollout, then deploy the website.
+The targeting fields are accepted and ignored rather than rejected, so an older website build still sending them is not broken by the API deploying first. **No migration is needed for this change**: the columns stay exactly as they are, and nothing reads them.
 
 ## Limits
 

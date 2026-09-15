@@ -41,6 +41,10 @@ For announcements, polls, and events, a null audience means all member groups. A
 
 The poll audience picker includes Rushees, but `rush` is absent from `DEFAULT_AUDIENCE`. Albums and document folders omit the Rushee option because those routes do not admit rush accounts.
 
+**The main announcement composer omits Rushees too, as of 2026-09-15**, and for a different reason than the others: it is not that the route refuses rushees, it is that nothing ever asked on their behalf. `/rushee/announcements` renders `RushAnnouncements` against `GET /rush-announcements`; no rushee page reads the main feed. So the pill wrote a row that could not be read while telling the author they had reached the rush class. Rush announcements are the way to reach rushees.
+
+The exclusion is passed at the call site through `TargetingPicker`'s `excludeAudience` prop rather than removed from the shared `AudienceSelect`. Events and polls use the same picker and **do** reach rushees, at `/rushee/calendar` and `/rushee/polls`, so removing the pill globally would break targeting that works.
+
 Keep static role lists such as `ROLES` at module scope and declared before use.
 
 ## The interest form

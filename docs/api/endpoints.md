@@ -675,10 +675,16 @@ The response fields also define the CSV export columns. Update the export when a
 Returns `200` with the caller's permissions:
 
 ```json
-{ "can_view": true, "can_edit_presentation": false }
+{ "can_view": true, "can_edit_presentation": true, "can_manage_signup": false }
 ```
 
-Use the separate flags to decide whether to show the page and its editor. A committee member may be able to read without being allowed to save a write-up.
+Use the separate flags to decide whether to show the page and each of its tabs.
+
+**They are not all the same audience.** `can_view` and `can_edit_presentation` both mean executive board or **any member** of the pledge committee. `can_manage_signup` is narrower: executive board or the pledge **chair** alone, matching `requirePledgeManage` on the `/admin/rush-signup` routes. Opening rush writes an Authentik invitation and creates the route by which strangers make accounts, which is a different kind of act from writing a paragraph about a rushee.
+
+Two changes landed on 2026-09-15. `can_edit_presentation` widened to the whole committee: it had required an `active`, `chair` or `eboard` member group on top of committee membership, which refused a committee member carrying the `pledge` or `alumni` group a write they were already trusted to read. And `can_manage_signup` was added, which is additive -- a client that ignores it is unaffected.
+
+Keep reading all three separately rather than deriving one from another. They have differed before and differ now.
 
 The former `pledge_committee` and `pledge_committee_set` fields are no longer returned. The committee page finds missing assignments by comparing [`GET /committees/slugs`](#get-committeesslugs) with each committee's `slug`. Until a slug is assigned, its committee-specific access remains unavailable; eboard retains access.
 
@@ -769,13 +775,13 @@ The upload reuses the member-avatar pipeline, so it accepts what a phone produce
 
 ### `PUT /rush-data/:id/presentation`
 
-**Executive board or active pledge committee members.** Accepts `{ "body": "..." }`, up to `TEXT_LIMITS.PRESENTATION_NOTE` (3000 characters), and returns the saved row. Validation errors return `400` with `field: "body"`.
+**Executive board or any pledge committee member.** Accepts `{ "body": "..." }`, up to `TEXT_LIMITS.PRESENTATION_NOTE` (3000 characters), and returns the saved row. Validation errors return `400` with `field: "body"`.
 
 There is one write-up per candidate. Repeated saves update it, and the last save wins. The authenticated route and `mayEditPresentation` controller check enforce access. This is the legacy plain-text fallback; formatted sections take precedence after they are saved.
 
 ### `DELETE /rush-data/:id/presentation`
 
-**Executive board or active pledge committee members.** Clears the write-up. Returns `204`, or `404` when none exists. Use this endpoint to clear it instead of saving an empty string.
+**Executive board or any pledge committee member.** Clears the write-up. Returns `204`, or `404` when none exists. Use this endpoint to clear it instead of saving an empty string.
 
 ---
 
@@ -836,9 +842,19 @@ Candidate bookings and interviewer assignments have separate limits:
 | Candidate attending | `interview_bookings` | `capacity` | Slot and round |
 | Member conducting the interview | `interview_slot_interviewers` | `interviewer_capacity` | Slot |
 
+### `GET /interviews/access`
+
+**Any member** (not rushees). Returns `{ "can_manage": true }` for executive board members and the pledge committee chair, and `{ "can_manage": false }` for everyone else. **200 either way**, so the website can decide whether to draw the Set Up tab and the Interviews nav entry without interpreting a 403.
+
+Added 2026-09-15 for a permission that existed and could not be used. The pledge chair has been accepted on every `/interviews/schedules` route since migration `1789000000000`, while the only Set Up page was `/admin/interviews` and `proxy.ts` refuses that whole portal to anyone outside the `eboard` group.
+
+Deliberately its own endpoint rather than a field on `GET /interviews/interviewer-schedules`, which the sidebar already calls: that route returns an **array**, and adding a field would mean making it an object, which is not an additive change and would break the iOS client's decoding.
+
 ### `GET /interviews/available`
 
-Returns published rounds and slots, including seats taken, `mine`, and `booking_id`. Other candidates' names are not returned.
+**Rushees only.** Returns published rounds and slots, including seats taken, `mine`, and `booking_id`. Other candidates' names are not returned.
+
+Any member group reaching this gets `403` with `code: "not_a_rushee"`. The router is mounted on `RUSH_ACCESSIBLE_GROUPS`, which admits active, chair, alumni, eboard and pledge as well, so the candidate routes carry their own gate on top of it.
 
 ### `GET /interviews/calendar`
 
@@ -846,9 +862,13 @@ Returns the caller's booked interviews in the event format used by the calendar 
 
 ### `POST /interviews/slots/:id/book`
 
+**Rushees only**, same gate and same `403` `not_a_rushee` as `GET /interviews/available`. An interview is conducted on a rushee, and a round is sized in seats, so a member taking one takes it from a candidate.
+
 Books a seat. Returns `409` with `code: "slot_full"` or `"already_booked"` when applicable. Missing and unpublished slots both return `404`.
 
 ### `DELETE /interviews/bookings/:id`
+
+**Not rushee-gated, deliberately**, unlike the two routes above: cancelling is done both by the rushee changing their mind and by whoever runs interviews clearing a no-show.
 
 The caller can cancel their own booking; eboard and chairs can cancel others. A push notification is sent when someone else cancels the booking.
 
@@ -874,7 +894,9 @@ Removes the caller's assignment. Executive board members and the pledge chair ca
 
 ### `POST /interviews/schedules`
 
-**Executive board members and the pledge chair.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_groups"?, "interviewer_committee_ids"? }`.
+**Executive board members and the pledge chair.** Creates a draft from `{ "title": "...", "description"?, "location"?, "interviewer_committee_ids"? }`.
+
+`interviewer_groups` and `interviewer_committee_ids` are **accepted and ignored** since 2026-09-15. Who may staff a round is fixed: the pledge committee. They are ignored rather than rejected so an older client still sending them gets its round created instead of a `400` it cannot act on. Neither field is returned in the response.
 
 ### `GET /interviews/schedules/:id`
 
@@ -882,9 +904,9 @@ Removes the caller's assignment. Executive board members and the pledge chair ca
 
 ### `PATCH /interviews/schedules/:id`
 
-**Executive board members and the pledge chair.** Updates round settings, including publication and interviewer groups/committees. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
+**Executive board members and the pledge chair.** Updates round settings, including publication. Changing `published` from false to true sends a push to current rushees. Saving an already-published round does not resend it.
 
-Omitting `interviewer_groups` or `interviewer_committee_ids` preserves that selection. Empty arrays clear only their respective selection. Allowed groups are `active`, `chair`, and `eboard`; alumni, pledge and rush are rejected. Group and committee matching is a union. Clearing both leaves executive board and pledge-chair access. Invalid input returns `400`. Migration `1791100000000_add-interviewer-groups.sql` adds the group list with an empty default, preserving existing committee targeting.
+The two targeting fields are **accepted and ignored**, as on create. Interviewer eligibility is the pledge committee and is not per-round. The columns added by migration `1791100000000_add-interviewer-groups.sql` are still on the table and still hold their old values; nothing reads them.
 
 ### `DELETE /interviews/schedules/:id`
 
@@ -1247,6 +1269,10 @@ Returns visible announcements. Members see untargeted posts plus those matching 
 ```
 
 An empty or omitted audience with no committee targets all member groups. Valid audience values are `eboard`, `chair`, `active`, `pledge`, `alumni`, and `rush`; other values return `400`.
+
+**`rush` is accepted and reaches nobody.** This endpoint stores it and `findAllForGroups` will serve it, but no rushee surface requests the main feed: `/rushee/announcements` renders the separate rush announcement board (`GET /rush-announcements`), and the rushee dashboard carries no announcements at all. The Rushees pill was removed from the composer on 2026-09-15 for that reason, and `scripts/strip-rush-announcement-audience.js` cleans up rows that already carry it.
+
+It stays **accepted rather than rejected** so an older client or the iOS app still sending it saves instead of returning a `400` on a field the author never touched. **Use `POST /rush-announcements` to reach rushees.** Events and polls are unaffected and do still reach them.
 
 ### `PUT /announcements/:id`
 
@@ -1865,9 +1891,9 @@ Decision-night visibility requires migration `1791200000000_add-decision-night-v
 
 ### Presentation sections and optional flags
 
-`PUT /rush-data/:id/presentation/sections/:section` is available to executive board members and active pledge committee members. The editable section is `summary`, `interview`, or `committee`. An attempt to edit `events` returns `403 attendance_read_only`; events come from recorded attendance. Send `{body_html, version}`: HTML is limited to 30,000 characters, with `version: 0` for a new section. The response contains sanitized HTML, the new version, and saved author/time. A stale version returns `409 presentation_conflict` without changing saved content. Invalid sections/HTML/version return `400`; an unrelated member receives `403`; a non-rushee target receives `404`.
+`PUT /rush-data/:id/presentation/sections/:section` is available to executive board members and any pledge committee member. The editable section is `summary`, `interview`, or `committee`. An attempt to edit `events` returns `403 attendance_read_only`; events come from recorded attendance. Send `{body_html, version}`: HTML is limited to 30,000 characters, with `version: 0` for a new section. The response contains sanitized HTML, the new version, and saved author/time. A stale version returns `409 presentation_conflict` without changing saved content. Invalid sections/HTML/version return `400`; an unrelated member receives `403`; a non-rushee target receives `404`.
 
-The deck and authorized rushee profile include the three editable `presentation_sections`; historical event-text overrides are retained in storage but omitted from responses. The deck also includes recorded `attended_events`. These are not raw interview notes. The legacy plain-text presentation endpoints now permit active pledge committee editors too; existing plain text is retained as the initial summary fallback.
+The deck and authorized rushee profile include the three editable `presentation_sections`; historical event-text overrides are retained in storage but omitted from responses. The deck also includes recorded `attended_events`. These are not raw interview notes. The legacy plain-text presentation endpoints permit every pledge committee editor too; existing plain text is retained as the initial summary fallback.
 
 | Method | Route | Behavior |
 | --- | --- | --- |

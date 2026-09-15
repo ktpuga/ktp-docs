@@ -34,6 +34,12 @@ The page shows signup status, the QR code, and open/close controls.
 | `POST /admin/rush-signup` | Creates an invitation from `{ name, expires }` |
 | `DELETE /admin/rush-signup/:pk` | Deletes an invitation |
 
+**Who may call these three: executive board, or the chair of the pledge committee.** Widened from eboard alone on 2026-09-15, because the chair runs rush and should not need an eboard member to unlock the signup link on the first morning of it.
+
+They are the only routes in `routes/admin.js` that are not eboard-only, and they achieve that by being registered **above** the router-level `requireGroup("eboard")` while carrying `requirePledgeManage` themselves. Express applies a router-level gate to everything registered after it and offers no per-route exemption, so this is the only way to widen three routes without changing their paths. **Moving them below that line silently revokes the chair.**
+
+The chair reaches them in the UI through the **Signup Links** tab on `/member/rush-data`, which renders when `GET /rush-data/access` reports `can_manage_signup`. That flag is narrower than the same endpoint's `can_view` and `can_edit_presentation`, which reach the whole pledge committee: opening rush creates the route by which strangers make accounts, so it stays with the chair. Eboard gets the identical tab from `/admin/rushees`, where `proxy.ts` is the gate.
+
 The public page and admin page read different sources:
 
 | Reader | Source |
