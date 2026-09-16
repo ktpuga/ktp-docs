@@ -14,6 +14,7 @@ The website chooses a portal from the user's Authentik groups, in this order:
 |---|---|
 | `eboard` | `/admin` |
 | `chair`, `active` | `/member` |
+| `inactive` | `/alumni`, labeled Inactive Member Portal |
 | `alumni` | `/alumni` |
 | `pledge` | `/pledge` |
 | `rush` | `/rushee` |

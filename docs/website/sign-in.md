@@ -226,3 +226,13 @@ To investigate a refusal:
 4. Compare the API's bucket offset and refusal reason. Short action times do not establish that the scanned code was fresh.
 
 These measurements do not capture camera-to-link time, a previous document before a login redirect, or all queue/network time before the Server Action starts. Resource Timing entries can be missing or evicted. Client values and trace IDs are untrusted diagnostics; do not infer identity from them. No tokens, cookies, raw QR values, arbitrary provider payloads or full URLs are added to these logs.
+
+## Inactive members
+
+The Authentik `inactive` group shares the alumni portal layout and permissions. It uses `/alumni` routes with an **Inactive Member Portal** label. The account stays `inactive` in the database, directory, profile, and group-management screen.
+
+Inactive members receive alumni-targeted announcements, events, notifications, group chats, shared files, and slideshow content. Active-only targeting does not include them. Their profile form and email privacy follow the alumni rules. This does not add them to the public alumni roster or grant active-member voting, interview staffing, or executive board access. Committee-specific permissions remain governed by the same separate rules that apply to alumni.
+
+Create `inactive` in Authentik before assigning it. Use the website's group-change action, or remove the previous membership role when changing it directly in Authentik. Existing role priority is preserved: an account that still has `active`, `chair`, or `eboard` retains that access. Inactive takes priority over its inherited alumni group.
+
+Run API migration `1791600000000_add-inactive-member-group.sql` before deploying the API, then deploy the website before moving users into the new role. The migration allows the new stored role. Rollback refuses while inactive rows exist, avoiding silent reclassification. Existing sessions follow the normal claim-refresh process; signing out and back in obtains fresh claims immediately.
