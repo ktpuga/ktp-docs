@@ -208,7 +208,8 @@ Direct and group sends use an in-memory limit of 20 messages per minute per user
 | `audience` | `TEXT[]` of target groups |
 | `committee_ids` | `INTEGER[]` of target committees |
 | `created_by` | Reference to the creator in `users` |
-| `requires_attendance` | Enables attendance tracking |
+| `requires_attendance` | Enables QR attendance tracking; does not alone count absences |
+| `mandatory_attendance` | Explicit opt-in to chapter or committee attendance totals; requires QR tracking |
 | `attendance_token` | Stored HMAC secret used to derive rotating check-in codes; never returned to clients |
 | `attendance_finalized_at` | Null while the roster can sync; timestamp when finalized, returned as `attendanceFinalizedAt` |
 

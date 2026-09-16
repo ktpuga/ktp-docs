@@ -241,6 +241,7 @@ Example request:
   "audience": ["active", "chair"],
   "committeeIds": [],
   "requiresAttendance": false,
+  "mandatoryAttendance": false,
   "requiresRsvp": false
 }
 ```
@@ -251,9 +252,13 @@ Events and polls store multiple committee IDs in `INTEGER[]` columns. Announceme
 
 Enabling `requiresAttendance` creates a random attendance secret if one does not exist. The secret is retained and is never returned by an endpoint. `services/attendanceCode.js` uses it as an HMAC key to generate rotating QR codes; publishing the key would allow callers to generate their own codes.
 
+`mandatoryAttendance` is a separate boolean, default false. It enables QR tracking when true and includes the event in attendance totals. Events targeted to committees count only in their committee logs; events without committee targets count toward the chapter allowance. Meetings are separate. See [Attendance log](../website/attendance-log.md).
+
 ### `PUT /events/:id`
 
 Checks permission against the existing event, then checks the requested targeting. Eboard can edit any event. Other callers can edit events they created or events belonging to a committee they chair, subject to the create/targeting checks on the update.
+
+An omitted `mandatoryAttendance` on an update preserves the saved value for older clients. Send `false` explicitly to make an event optional.
 
 ### `DELETE /events/:id`
 

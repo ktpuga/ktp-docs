@@ -108,7 +108,7 @@ The hook polls every 60 seconds, compared with 30 seconds for tab notifications 
 | Ordinary event or meeting | Two hours and 30 minutes |
 | Required event | One day, two hours, and 30 minutes |
 
-Required-event reminders use the title "Required event" and state that attendance is taken. Event writes rebuild scheduled jobs, and deletion removes them.
+Only events marked **Mandatory attendance** use the required-event reminder schedule. QR tracking alone does not make an event required. Required-event reminders use the title "Required event" and state that attendance is taken. Event writes rebuild scheduled jobs, and deletion removes them.
 
 Reminders use iOS push. Members without an eligible app registration do not receive them.
 

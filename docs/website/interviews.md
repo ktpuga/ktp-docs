@@ -327,7 +327,7 @@ Member-group gate plus note-specific authorization:
 | `GET` | `/interviews/bookings/:id/notes` | Deprecated, still live. `{ access, notes }` |
 | `PUT` | `/interviews/bookings/:id/notes` | Deprecated, still live. Save own `{ body }` |
 | `DELETE` | `/interviews/notes/:noteId` | Delete an authorized note |
-| `GET` | `/interviews/schedules/:id/notes` | Round-note view, eboard or any pledge committee member; not the projected deck |
+| `GET` | `/interviews/schedules/:id/notes` | Retained API route for authorized round-note reads; no Interview Set Up UI |
 
 Keep the narrower route checks even though the router already authenticates callers. The router also admits rushees.
 
@@ -407,3 +407,10 @@ In interview setup, **Change locations** lets executive board members and the pl
 The operation uses the existing permission-checked slot update action and sends only the location field. Times, capacities, bookings, and interviewer assignments remain intact. Updates run sequentially, not as one database transaction. If an update fails, the operation stops, reports the number of confirmed changes, and reloads the schedule for review. Keep the page open while it runs. Room-only changes do not currently send notifications; contact affected people separately if needed.
 
 Candidate and member timetables use alternating row shading. After a rushee books successfully and the data refreshes, the table is replaced by the existing booking confirmation card with the chosen time and location.
+
+## Editing without expanding the page
+
+New interview rounds, individual slot editing, location changes, and the rushee preview open in popups. Closing returns to the underlying schedule. A failed round or slot save keeps the draft and its error visible. Location changes keep their progress and any failure message in the popup. Confirmation prompts appear above the editor that opened them.
+
+
+Interviewer notes are shown on each rushee data profile, not in Interview Set Up. Open the profile from Rushee Data or the rushee name in a booked interview slot. Removing the setup section does not delete saved notes or change profile permissions.
