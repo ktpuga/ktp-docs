@@ -6,6 +6,8 @@ sidebar_position: 1
 
 `uga-ktp-website` serves [ugaktp.com](https://ugaktp.com), including the public site and authenticated portals. It uses Next.js 16 with the App Router, Turbopack, Tailwind, and shadcn/ui. Portal data comes from the separate `ktp-api` deployment. See [API Overview](../api/overview.md).
 
+See [Attendance log and emergency requests](attendance-log.md) for semester totals, the four-absence allowance, and Judicial Board review.
+
 ## Portals
 
 The website chooses a portal from the user's Authentik groups, in this order:
