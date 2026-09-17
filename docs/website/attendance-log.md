@@ -16,14 +16,14 @@ Attendance has three views:
 
 Members choose a semester and see their own attended events, missed events, counted absences, emergency waivers, and remaining free absences. In chapter and committee logs, **View events** opens the member record in a modal over the page. Close it with **Close record**, Escape, or the backdrop. The missed-events filter includes waived absences so a member can still see every event they missed.
 
-- Four free absences per semester for mandatory chapter events. Both excused and unexcused absences use this allowance. Committee events have separate totals with no four-absence allowance.
+- Four free absences per semester for mandatory chapter events. Absent marks and closed unmarked obligations use this allowance. Excused marks do not; record ordinary excuses as Absent. Committee events have separate totals with no four-absence allowance.
 - Only calendar events explicitly marked **Mandatory attendance**, with QR tracking enabled and a verified expected-attendee roster, enter a tally. QR tracking alone does not make an event mandatory.
 - An event enters the tally when its scheduled start time arrives. Check-in remains open until 30 minutes after its end. An unmarked member is pending until that window closes.
-- A recorded `present` mark counts as attended. A missing mark, `absent`, or `excused` counts as an absence after check-in closes.
+- A recorded `present` mark counts as attended. A missing mark or `absent` counts as an absence after check-in closes. An `excused` mark is recorded separately and does not consume the allowance.
 - An approved emergency waiver removes that absence from the allowance. It does not create a check-in or change the underlying attendance mark.
 - Totals update from saved attendance marks and waiver decisions. The page refreshes every 30 seconds while visible and when the browser regains focus. Refresh pauses during an open form or member-detail review; close it or use Refresh to load updates.
 
-**Excused** counts completed absences marked excused through check-in management that have not been emergency-waived. It is a subset of counted absences, not an extra absence to add. **Emergency waived** counts approved emergency absences separately. A waived event appears only in that column, even if its underlying attendance mark is excused. Pending events do not enter either count until check-in closes. Committee logs show Excused but do not expose private emergency decisions.
+**Excused** counts completed absences marked excused through check-in management that have not been emergency-waived. It is separate from counted absences and never consumes a free absence. **Emergency waived** counts approved emergency absences separately. A waived event appears only in that column, even if its underlying attendance mark is excused. Pending events do not enter either count until check-in closes. Committee logs show Excused but do not expose private emergency decisions.
 
 The Judicial Board determines semester dates. Authorized reviewers enter them with **Add semester** or **Edit semester dates**. Dates are inclusive, use the event's start date in `America/New_York`, and cannot overlap. Changing the dates recalculates which events belong to that semester. The system does not impose a penalty when the allowance is exceeded; it displays the count for review.
 
@@ -99,14 +99,28 @@ All routes below require bearer authentication and a member group. The API also 
 
 The down migration deletes these new tables, including requests and evidence. Do not run it against a populated deployment without a separate data-preservation plan.
 
+## Full event history
+
+Personal attendance and View events include started events in the selected semester that are visible to the member, plus events with their saved attendance or RSVP even if their membership later changed. Optional events appear without requiring an RSVP. Calendar visibility uses the current stored role and committee memberships because historical visibility is not recorded. Verified mandatory obligations still use the saved roster.
+
+Each row has `mandatory_attendance` and `counts_toward_total`. Only verified required rows in the current log have `counts_toward_total: true`; supplemental history rows are false. This keeps chapter and committee totals separate and prevents optional events or unverified history from consuming free absences. A required event outside the current tally is labeled accordingly. Current committee members may have history with zero counted events.
+
+An optional event without a check-in says No attendance recorded, with the member's RSVP when available. An RSVP never becomes proof of attendance. Show missed required events only excludes supplemental history, and emergency waiver choices still include only eligible required chapter events. Reviewers without access to a supplemental event see Private event; its source ID is omitted.
+
 ## Scheduling conflicts and popups
 
-The event table includes scheduling conflicts for that member. It checks other events on their captured attendance roster or marked Going, meetings they organized or accepted, and interview slots they booked or signed up to run. A shared boundary is not an overlap: a meeting ending exactly when an event starts is excluded. Cancelled meetings, declined invitations, and unclaimed interview slots are excluded.
+The event table includes scheduling conflicts for that member. It checks every overlapping calendar event, regardless of audience, required status, RSVP, check-in, or whether it appears in the member history. This includes rush events targeted at a different group and events the member declined. Meetings still require an organizer or accepted-invite relationship, and interviews still require a booking or interviewer assignment. Calendar overlap alone does not prove attendance. Event conflicts include the recorded attendance status when available, so an attended rush event is distinguished from an event with no attendance record. A shared boundary is not an overlap: a meeting ending exactly when an event starts is excluded. Cancelled meetings, declined invitations, and unclaimed interview slots are excluded.
 
 Conflicts are information for the reviewer. They do not mark attendance, excuse an absence, or grant an emergency waiver. The lookup uses retained schedules and assignments, so deleted or changed appointments may no longer describe the original conflict.
 
 Each conflict includes its type and start/end times. Event titles follow calendar visibility. Meeting titles are visible only to that meeting's organizer or invitees, even when the reviewer is on the executive board. Interview round titles are visible to the member involved, the pledge committee, and executive board. Other viewers see a private meeting/interview/event label and its time. No participant lists, candidate identities, messages, locations, or source IDs are included.
 
-Personal records, member detail, and committee records return a `conflicts` array per attendance record. Entries contain `type` (`event`, `meeting`, or `interview`), `title` (nullable), `starts_at`, and `ends_at`. Chapter summary responses do not run this lookup. No additional migration is needed; deploy the API before the website for conflict details.
+Personal records, member detail, and committee records return a `conflicts` array per attendance record. Entries contain `type` (`event`, `meeting`, or `interview`), `title` (nullable), `starts_at`, `ends_at`, and `attendance_status` (null for meetings and interviews). Chapter summary responses do not run this lookup. No additional migration is needed; deploy the API before the website for conflict details.
 
 View events, emergency request forms, emergency review, semester editing, and historical roster review open above the page. Errors stay inside the form, and unsuccessful submissions preserve its contents. Close, Escape, or clicking outside dismisses a popup; saving temporarily disables dismissal.
+
+
+The chapter attendance table shows Member, Attended / total, Absences, Excused, Emergency waived, and Record. Free left and Over allowance are omitted from the table. The allowance calculation and the summary cards in personal attendance and the member-detail popup are unchanged.
+
+
+Required event titles appear blue in the history table in light and dark mode. The revised Excused rule applies to existing saved Excused marks as well as new ones. It changes calculated totals, not stored attendance marks, and requires no migration. The required-event denominator still includes excused events; Excused is not treated as Attended.
