@@ -47,7 +47,7 @@ Test list and count queries together when changing targeting.
 
 ### Exclusions {#deliberate-quiet}
 
-Own posts, closed or expired polls, and cancelled meetings do not contribute to new-content counts. Interview schedules count from publication rather than draft creation, and booking clears the corresponding signup prompt.
+Own announcements, closed or expired polls, and cancelled meetings do not contribute to their respective counts. An unanswered poll can count even when the member authored it. Interview schedules count from publication rather than draft creation, and booking clears the corresponding signup prompt.
 
 ### Committees is different: the unit of "seen" is the committee
 
@@ -139,3 +139,12 @@ A claimed send is not proof of successful delivery to every recipient.
 No mail transport is configured on the API, so email is disabled and the compose checkbox is hidden. No environment variable enables it. Turning email on means implementing a transport in `services/emailService.js` on the API; the website needs no change, because it reads `GET /notifications/channels` at page load.
 
 The API checks configuration before claiming a send. This avoids marking a post emailed when email is unavailable, but does not imply that enabling email later automatically sends earlier posts.
+
+
+## Dashboard and attendance action counts
+
+Poll badges count visible, open, unexpired polls the member has not answered, including existing polls. Opening Polls does not clear the count; voting, closure or expiry does.
+
+My Attendance badges count the user's unread decisions from the current Eastern-time semester. Attendance Log badges count pending emergency requests plus required chapter rosters needing verification after check-in closes, and are restricted to Judicial Board and executive board reviewers. The same counts appear on the emergency-response/review buttons and in compact dashboard attention rows.
+
+Attendance acknowledgements use the displayed server snapshot rather than the current time, so a decision arriving later remains unread. Read timestamps persist across devices. These additions do not send email or push notifications. They require API migration `1791900000000_attendance-notification-views.sql` before the API release; production migration status is not established by this documentation update.

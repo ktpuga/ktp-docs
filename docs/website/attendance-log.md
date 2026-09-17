@@ -56,7 +56,7 @@ A member opens **Request emergency waiver**, chooses an eligible upcoming event 
 - A written explanation, up to 5,000 characters.
 - One PDF, PNG, or JPEG document, up to 5 MB.
 
-This creates a request in the Judicial Board and executive board queue. It does not send an email or grant a waiver automatically. Reviewers use **Emergency requests**, download the documentation, and approve or deny with a written decision note. The member sees their own status and note. Reviewers cannot decide their own requests.
+This creates a request in the Judicial Board and executive board queue. It does not send an email or grant a waiver automatically. Reviewers use **Emergency requests**, preview the documentation in a dialog, and approve or deny with a written decision note. The member sees their own status and note. Reviewers cannot decide their own requests.
 
 New emergency requests apply to mandatory chapter events, not committee events. Only one pending or approved request per member/event is allowed. A denied request can be submitted again with additional documentation. Decisions record the reviewer, time, explanation, and version. A second reviewer using an older version must refresh before saving. Revising a decision appends to the decision history; it does not erase the earlier decision.
 
@@ -64,7 +64,7 @@ New emergency requests apply to mandatory chapter events, not committee events. 
 
 The API checks the authenticated user for every request. Members cannot choose another user ID for their own records or requests. Chapter totals, roster verification, the emergency queue, and decisions require `eboard` or membership in the committee with slug `judicial`. Being a chair of another committee does not grant access.
 
-Documents are stored privately in Postgres as binary data, not in the shared document library or a public URL. Only the submitting member, Judicial Board, and executive board can download one. Metadata responses omit file bytes. Downloads use an authenticated website proxy with `private, no-store`, attachment disposition, `nosniff`, and a sandbox policy. The API checks the file signature and supplied type; it does not run an antivirus scan. Database backups include this documentation. Do not put explanations or file contents in application logs.
+Documents are stored privately in Postgres as binary data, not in the shared document library or a public URL. Only the submitting member, Judicial Board, and executive board can access one. Metadata responses omit file bytes. Previews use an authenticated website proxy with `private, no-store`, `nosniff`, and a sandbox policy. The API returns an attachment; the website changes successful PDF, PNG and JPEG responses to inline disposition, preserving the filename. The API checks the file signature and supplied type; it does not run an antivirus scan. Database backups include this documentation. Do not put explanations or file contents in application logs.
 
 ## API routes
 
@@ -124,3 +124,10 @@ The chapter attendance table shows Member, Attended / total, Absences, Excused, 
 
 
 Required event titles appear blue in the history table in light and dark mode. The revised Excused rule applies to existing saved Excused marks as well as new ones. It changes calculated totals, not stored attendance marks, and requires no migration. The required-event denominator still includes excused events; Excused is not treated as Attended.
+
+
+## Response badges and document previews
+
+**Emergency excuse responses** links members to their requests and displays the number of unread current-semester decisions. The reviewers' **Emergency requests** button shows requests awaiting review. Viewing a page does not acknowledge decisions; the existing **Mark attendance updates as read** action persists read state across devices.
+
+**Preview documentation** opens an in-page dialog, not a new tab. Close, Escape and backdrop dismissal return to the attendance page; closing restores focus. The preview uses up to 90% of the viewport height with a visible header and Close button. PNG and JPEG images use contain sizing to fit the available area. PDFs use the browser viewer with `view=Fit` and collapsed navigation panes; support for these settings depends on the browser. Multi-page PDFs can still require internal scrolling. These are layout defaults, not a guarantee that long documents remain readable without zooming.
