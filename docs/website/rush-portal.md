@@ -230,3 +230,17 @@ Visibility queries use the caller's group array, while notification recipient qu
 - Rushees have no Attendance tab. QR check-in opens `/checkin/[eventId]/[token]` outside the portal.
 - Rushees use Interviews instead of Meetings. The meetings API does not admit rush accounts.
 - `EventsCalendar.loadCalendarItems` catches failures for its additional meeting and interview sources separately, preserving the event calendar if either source is unavailable.
+
+## Archiving and returning rushees
+
+The staff roster shows interview status and labels **Returning rushee** when a new account uses an email found in the chapter archive. The profile also shows the previous archive date and interview status. A different email does not match automatically.
+
+Eboard and the pledge chair can open an uncompleted rushee's profile and choose **Archive and delete account**, then type `archive` to confirm. This saves the profile and rush history before deleting the Authentik login and removing portal access. It does not permanently erase the archive. Self-service account deletion follows the same archive-first process; both website and iOS confirmations explain retention.
+
+Returning rushees create a new account using the same email. Their new interview status starts incomplete. If the archive is unavailable, deletion stops. If a remote deletion times out, the API keeps access blocked and permits retrying the removal to finish safely.
+
+### Bulk removal after interview signup
+
+Eboard and the pledge chair can choose **Remove rushees without interviews** in the roster. Review the names and emails, deselect anyone to keep, and type `archive`. The list includes only current rushees with no interview booking and no completed interview, regardless of the roster's search filter. Booked/completed interviews, members and test accounts are protected.
+
+Each account is rechecked just before removal. Anyone who booked since the review list loaded is skipped. Profiles and history are archived before Authentik login deletion. The dialog shows individual results and supports retrying unfinished removals; it stops if a service failure occurs. The action does not run automatically when signup closes.

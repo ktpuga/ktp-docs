@@ -4,6 +4,12 @@ title: Decision-night voting
 
 Decision night lets an executive board member or pledge chair open a timed vote for the rushee currently being discussed. Members vote from their own portal. The API stores votes and decides when voting closes.
 
+## Interview badges and candidate inclusion
+
+Current rushees appear automatically once they have an interview booking; explicitly completed interviews also qualify. A booked interview does not need to be manually marked completed. Rushees with neither are excluded. The roster, rushee profile and slides show **Interview completed**, **Interview booked**, or **No interview booked**. A retained past booking still counts as booked; actual completion is recorded explicitly.
+
+Eboard and pledge committee members can use **Hide from Decision Night** on a rushee profile. Hidden rushees stay in the roster, labeled Hidden, and can be restored with **Show in Decision Night**. Hiding excludes the candidate from slides and new voting rounds; it does not delete their account. Close an active vote before hiding its candidate. Global Decision Night visibility approval is separate and unchanged.
+
 ## Slide layout and editing
 
 The slide follows three columns: a smaller photo, full name, profile details, resume button and events attended on the left; summary and interview notes in the middle; pledge committee notes on the right. The resume button sits directly below the photo. Graduation date and GPA share a row, and green/red flag totals appear side by side below the profile.
