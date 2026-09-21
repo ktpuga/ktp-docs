@@ -30,7 +30,7 @@ Slides, editor controls and the voting timer follow the portal's light/dark them
 
 During an open voting round, eligible members can choose **Green flag** or **Red flag** beside their ballot, or leave both unset. Clicking the selected flag again or using **Clear flag** removes it. Each account has at most one flag per round; flags can change only while voting is open and Decision Night is visible. A flag is independent of the five-choice vote.
 
-The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and current pledge committee members can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
+The projected slide checks totals about every second. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and current pledge committee members can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
 
 ## Starting member voting
 
@@ -70,7 +70,7 @@ Only one voting round can be open at a time. Opening the same rushee again after
 Open **Committees > Pledge Committee > Decision Night Results** in the admin or member portal. Executive board and current pledge committee members can read the page; voting management remains executive-board/pledge-chair only. The tabs are:
 
 - **Voting rounds:** choose among the latest 100 stored rounds and refresh totals, named ballots and optional flags. Older rounds remain available by API ID. Only managers see Close voting now.
-- **Tier list:** latest closed-round weighted averages, ranks, counts, in/discuss/out projections and expandable answer breakdowns. Ties and insufficient votes stay protected. Refreshes every 15 seconds while visible.
+- **Tier list:** latest closed-round weighted averages, ranks, counts, in/discuss/out projections and expandable answer breakdowns. Ties and insufficient votes stay protected. Refreshes every second while visible.
 - **Results chart:** projected group sizes and a score histogram with accessible values. This does not represent saved final bids; final bid decisions are not implemented. First-round review and locking are available in the meeting panel.
 - **Simulation:** embedded synthetic rehearsal with PNM/member counts, adjustable distribution percentages, vote editing and simulated round locking. It never changes real votes. Switching hub tabs keeps the rehearsal; leaving the page resets it.
 
@@ -78,7 +78,7 @@ Keep named results off the projector. The presentation itself shows voting contr
 
 ## Timing and recovery
 
-The voting page checks for changes about every two seconds while visible. Background tabs check less often and refresh when brought back. This is polling, so opening a round may take roughly one polling interval plus network time to appear. No WebSocket service is required.
+The voting page checks for changes about every second while visible. Background tabs check less often and refresh when brought back. This is polling, so opening a round may take roughly one polling interval plus network time to appear. No WebSocket service is required.
 
 The API uses its database clock to enforce expiry. Browser clocks cannot extend a round. The countdown uses server-relative time and elapsed browser time, with a conservative allowance for request travel. It can reach zero slightly before the API deadline. Requests that wait for a database lock are checked against the time after that wait.
 
@@ -98,16 +98,16 @@ Before the meeting, rehearse with permitted accounts in a non-production environ
 
 ## Distribution simulation and upcoming two-round workflow
 
-The approved relative split is **25% in / 35% discussion / 40% out**. For 60 PNMs this targets **15 in, 21 discussion, 24 out**. Average ballot weights are Strong yes +1, Weak yes +0.5, Undecided 0, Weak no -0.5, Strong no -1. Placement in the in/out groups requires at least 28 votes, based on an expected minimum of 35 voters. In/out counts round down; discussion receives the remainder. Boundary ties and low-turnout tie groups stay together in discussion, with no backfilling. Discussion can therefore exceed 35%.
+The approved relative split is **25% in / 35% discussion / 40% out**. For 60 PNMs this targets **15 in, 21 discussion, 24 out**. Average ballot weights are Strong yes +1, Weak yes +0.5, Undecided 0, Weak no -0.5, Strong no -1. There is no vote-count minimum. Unvoted and all-abstain applicants stay unranked in discussion. In/out counts round down; discussion receives the remainder. Boundary ties and unranked applicants stay in discussion, with no backfilling. Discussion can therefore exceed 35%.
 
-Executive-board/pledge-committee `GET /decision-night/rankings` now scopes results to the latest meeting and phase. Unassigned practice ballots are excluded. The minimum is fixed at 28; missing ballots require explicit manager deferral before locking. Once locked, first-round groups are frozen. No bids are awarded. Apply the migration and coordinated website update described below. Ordinary members outside the pledge committee do not gain access.
+Executive-board/pledge-committee `GET /decision-night/rankings` now scopes results to the latest meeting and phase. Unassigned practice ballots are excluded. There is no minimum or per-applicant completion requirement; applicants without scored votes stay in discussion automatically. Once locked, first-round groups are frozen. No bids are awarded. Apply the migration and coordinated website update described below. Ordinary members outside the pledge committee do not gain access.
 
 ### Try the interactive simulation
 
 In the ktp-api repository, open `docs/simulations/decision-night-simulator.html` in a browser. It is self-contained and works offline.
 
 1. Set the PNM and member counts, then start a new scenario (defaults: 60/35). Try tie, low-turnout, identical-score and missing-vote presets. Change the in/discussion/out percentages and use Apply distribution to keep the same votes while comparing splits. Whole percentages must total 100; these overrides affect the simulation only.
-2. Select an applicant or click their name, edit the five vote counts and apply them. Check the 27-versus-28-vote behavior or mark voting still open.
+2. Select an applicant or click their name, edit the scored vote and abstention counts and apply them. Try a single scored vote, all abstentions, or mark voting still open.
 3. Confirm round one to freeze its synthetic groups. The second-round queue contains only discussion candidates.
 4. Generate second-round votes or edit ballots individually. The original in/out groups remain fixed, and first-round averages stay visible.
 5. Start a new scenario to reset. Percentage controls stay locked during round two. Reloading clears the rehearsal.
@@ -127,9 +127,10 @@ All routes below are under `/decision-night`. Results readers are executive boar
 | GET /meeting | Results readers; latest meeting, first-round preview or snapshot, second-round averages and progress. |
 | POST /meetings | Manager; request_id UUID. Idempotently start Round 1 with a fixed eligible roster. Close old active ballots first. |
 | POST /rounds | Existing fields plus meeting_id integer and phase 1 or 2, explicitly captured by the caller. Stale phases are rejected. |
-| POST /meetings/:id/candidates/:candidateId/defer | confirm: discussion. Explicitly keep a zero-vote applicant in discussion. Opening their Round 1 ballot clears deferral. |
-| POST /meetings/:id/lock-round-one | confirm: lock and review_token from GET /meeting or /rankings. All ballots must be closed; missing votes require explicit deferral. Changed results require fresh review. |
+| POST /meetings/:id/candidates/:candidateId/defer | Legacy optional action; no longer needed because zero-scored-vote applicants stay in discussion automatically. |
+| POST /meetings/:id/lock-round-one | confirm: lock and review_token from GET /meeting or /rankings. All active ballots must be closed; missing or all-abstain responses stay in discussion. Changed results require fresh review. |
 | POST /meetings/:id/start-round-two | confirm: start. Requires locked Round 1; only its saved discussion group can receive ballots. |
+| POST /meetings/:id/close | confirm: close. End any unfinished meeting and its active ballot, preserve history, close member access; Start Round 1 creates a fresh meeting. |
 | POST /meetings/:id/complete | confirm: complete. No active ballot; saves Round 2 averages, preserving unvoted applicants as unranked. Does not award bids. |
 | DELETE /rounds/:id | confirm: delete and expected_vote_count integer. Removes votes/flags from that closed ballot only. A retained deletion record prevents old request IDs from recreating it. |
 
@@ -141,7 +142,7 @@ Tests: `test/decisionMeeting.test.js`, `test/decisionNight.test.js`, `test/decis
 
 ### Round 2 presentation roster
 
-When the meeting enters Round 2, the presentation list and open slide rotation show only candidate IDs in the saved Round 1 discussion group. The website checks meeting state every two seconds while visible and refreshes when the tab regains visibility. If the selected candidate leaves the rotation, the deck displays the first remaining candidate; otherwise selection stays on the same person. Slide counts and keyboard navigation use the filtered list. Completed meetings retain this discussion-only view.
+When the meeting enters Round 2, the presentation list and open slide rotation show only candidate IDs in the saved Round 1 discussion group. The website checks meeting state every second while visible and refreshes when the tab regains visibility. If the selected candidate leaves the rotation, the deck displays the first remaining candidate; otherwise selection stays on the same person. Slide counts and keyboard navigation use the filtered list. Completed meetings retain this discussion-only view.
 
 Edit mode retains all slides and saved content. A missing or empty saved discussion list produces an empty presentation, never a fallback to the full roster. Failed meeting reads pause presentation with an error until a successful refresh. This filtering depends on the meeting API migration; the website Start Round 2 and review/lock controls are in the results page meeting panel.
 
@@ -152,14 +153,41 @@ In **Committees > Pledge Committee > Decision Night Results**, managers use the 
 1. Under Voting rounds, close any active practice ballot. Select an unwanted closed ballot and use **Delete this ballot**, review its name/count, type `delete`, and confirm. Locked/completed phases are protected. Deleting a newer unlocked ballot can expose an earlier ballot for that candidate; no profile is removed. Old unassigned ballots are excluded from new meeting rankings even if retained.
 2. **Start Round 1** and confirm. The API captures the eligible roster. Starting Round 1 automatically opens Decision Night to members.
 3. Open each applicant's timed vote from their presentation slide/profile. The request explicitly includes its meeting and phase; old requests cannot become Round 2 votes. A retry retains its request ID without extending the ballot.
-4. Return to results, close outstanding voting, then **Review and lock Round 1**. Review the full in/discussion/out lists before Confirm. Under Applicants awaiting votes, **Keep in discussion** explicitly defers a zero-vote applicant; it never places them in/out. Any change during review requires another review.
-5. **Start Round 2** and confirm. Open presentation decks automatically filter to the saved discussion group within their visible polling interval (about two seconds). Edit mode retains the full deck.
+4. Return to results, close outstanding voting, then **Review and lock Round 1**. Review the full in/discussion/out lists before Confirm. No vote minimum is required. Applicants without scored votes stay in discussion automatically. Any change during review requires another review.
+5. **Start Round 2** and confirm. Open presentation decks automatically filter to the saved discussion group within their visible polling interval (about one second). Edit mode retains the full deck.
 6. Open each discussion applicant's Round 2 ballot. The Tier list defaults to Round 2 and shows its scores separately with original Round 1 averages. Switch to **Round 1 (locked)** to inspect the original groups.
 7. Close active voting, then **Review and complete Round 2** and confirm. Missing votes stay unranked. Completing does not award bids, choose a final class, or change accounts.
 
-The meeting panel polls every two seconds while visible and ten seconds when hidden. The browser proxy only forwards allowlisted routes, protects all POST/PUT/DELETE requests with same-origin checks, and keeps API credentials server-side. Private meeting results are not returned to ordinary voters. Tests in scripts/test-decision-night.cjs cover confirmations, original review tokens, explicit phases, request reuse, separate rankings and deletion. Rehearse with test accounts in a non-production environment before using live voting; the embedded simulator remains synthetic only.
+The meeting panel polls every second while visible and ten seconds when hidden. The browser proxy only forwards allowlisted routes, protects all POST/PUT/DELETE requests with same-origin checks, and keeps API credentials server-side. Private meeting results are not returned to ordinary voters. Tests in scripts/test-decision-night.cjs cover confirmations, original review tokens, explicit phases, request reuse, separate rankings and deletion. Rehearse with test accounts in a non-production environment before using live voting; the embedded simulator remains synthetic only.
 
 
 ## Adjustable slide columns
 
 The main slide text is Short bio + rush summary on the left and Interview notes on the right, beside the profile/attendance sidebar. Pledge committee notes have been removed from presentation and edit mode; stored notes are retained. On desktop, drag the vertical divider in presentation mode to change widths. Focus it and use arrow keys for keyboard adjustment; double-click resets to 55/45. Both columns keep at least 25% of the text area. The split remains while moving between candidates in the open presentation. Small screens stack the sections.
+
+
+## Closing, restarting, abstaining and automatic results
+
+Managers can use **Close meeting** from any unfinished meeting, including a test with no votes. Confirming immediately closes its active ballot, closes member voting access and preserves the meeting's responses in history. Then choose **Start Round 1 for a new meeting**. This captures the current eligible roster and starts with no carried-over votes. Retried or stale requests cannot stop a newer meeting. Normal Round 2 completion also closes member access.
+
+There is no 28-vote requirement and no need to individually defer applicants with missing votes. Any number of scored responses can determine an average. Applicants without scored responses stay unranked/in discussion; an active ballot must still close before groups are locked. Existing locked snapshots remain unchanged; a fresh meeting uses the new policy.
+
+**Abstain** is a sixth response, distinct from Undecided. Undecided contributes zero to a scored average; abstention is excluded from its numerator and denominator. Abstentions are visible separately in response totals and named results. All-abstain applicants are unranked and remain in discussion. A voter can change an abstention to a scored choice, or vice versa, until the same deadline. API ranking rows provide scored vote_count, abstain_count and participation_count; meeting progress counts any submitted response.
+
+Results update immediately after successful local mutations, at the selected ballot's server-relative deadline, and through a one-second refresh while visible for changes from other sessions. Other tabs receive a storage signal containing only a change marker. Background refresh preserves selected history and does not interrupt a deletion confirmation. Connection/permission errors clear results. This uses polling, not a guarantee of instantaneous cross-device delivery.
+
+**Deployment:** apply `1792300000000_decision-night-abstain.sql`, then deploy API before website. The existing meeting migration is also required. The new migration adds abstain to the allowed response choices; it never deletes votes. Rollback refuses if abstentions exist. No live ballots were changed during development.
+
+### Reset Decision Night completely
+
+Managers (executive board or pledge chair) can select **Reset Decision Night** in the results page, review the counts, type `reset`, and confirm. This permanently deletes ALL Decision Night meetings, meeting rosters, ballots (including unassigned practice ballots), votes, flags, and locked snapshots. Voting is hidden/stopped, and the page returns to **No meeting started** with empty tiers and charts. It does not start Round 1. Profiles, interviews, and notes are untouched; the standalone synthetic simulation is separate.
+
+Unlike Close meeting, reset does not preserve Decision Night history. The API exposes manager-only `GET /decision-night/reset` for a preview and `POST /decision-night/reset` with `{confirm:"reset", review_token}`. A transaction uses the existing voting lock and rejects stale previews if data changed, including same-count vote edits. IDs are not reused. No new migration is required for reset; deploy the API endpoint before using the website control.
+
+### Decision Night simulation themes
+
+The simulator now follows the portal light/dark setting, including cards, inputs, tables, selected rows, and group badges. Switching themes updates the sandboxed iframe without reloading or losing synthetic votes/settings. Standalone simulator files follow the system theme by default and accept `?theme=light` or `?theme=dark`. Theme messages carry no private data and are accepted only from the parent frame. Edit the API simulator template, rebuild with `node scripts/build-decision-night-simulator.js`, and copy its output to the website public simulator to keep both artifacts synchronized.
+
+### Merge saved committee presentation text into summary
+
+Apply API migration `1792400000000_merge-committee-presentation-summary.sql` to append existing curated committee slide text to the same short bio/rush summary field. It preserves existing rich summary text or safely escapes the legacy plain-text summary, respects intentionally cleared summaries, and retains original committee rows for recovery. Matching text is not appended twice. The presentation remains two columns with one summary editor on the left and interview notes on the right. Private interview evaluations are not copied. The migration refuses automatic rollback to protect subsequent edits.

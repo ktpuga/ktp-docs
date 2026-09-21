@@ -42,3 +42,7 @@ Attendance troubleshooting is documented in docs/api/endpoints.md (correlated at
 Decision Night documentation now includes the approved 25/35/40 distribution preview, 28-vote minimum, interactive offline rehearsal and reproducible synthetic simulations, and the remaining first-round lock/second-round workflow steps. See `docs/website/decision-night.md`.
 
 Decision Night now has a Pledge Committee results hub with round details, tiers, projected charts and embedded simulation. Current committee members may read named results; management permissions remain unchanged. Deploy the API read-permission update before the website.
+
+### Decision Night simulation themes
+
+The simulator now follows the portal light/dark setting, including cards, inputs, tables, selected rows, and group badges. Switching themes updates the sandboxed iframe without reloading or losing synthetic votes/settings. Standalone simulator files follow the system theme by default and accept `?theme=light` or `?theme=dark`. Theme messages carry no private data and are accepted only from the parent frame. Edit the API simulator template, rebuild with `node scripts/build-decision-night-simulator.js`, and copy its output to the website public simulator to keep both artifacts synchronized.
