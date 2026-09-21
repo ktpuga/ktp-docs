@@ -32,13 +32,11 @@ During an open voting round, eligible members can choose **Green flag** or **Red
 
 The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and current pledge committee members can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
 
-## Visibility approval
+## Starting member voting
 
-Decision Night starts hidden from ordinary members. An executive board member or pledge chair opens **Decision Night** in their portal and presses **Show Decision Night** when approved. Executive board members use `/admin/decision-night`; the pledge chair uses `/member/decision-night`. Managers retain the page and results link while hidden. Other members see the sidebar link only after approval; a saved URL shows an unavailable message while hidden.
+A manager confirms **Start Round 1** in **Pledge Committee > Decision Night Results** to open Decision Night to members. Meeting creation and member visibility are saved in one transaction; a failed start keeps access closed. The voting page no longer has a separate Show/Hide control.
 
-**Hide Decision Night** removes member access and blocks new votes and opening rounds. It does not delete votes, close rounds, or reset deadlines. If shown again before an existing round expires, that round returns with its original deadline. Use the separate **Close voting now** action to end a round early.
-
-The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain available to executive board and current pledge committee members regardless of voting visibility.
+Starting the meeting does not open every applicant's ballot. The presenter still opens each timed vote individually from its slide. Member navigation refreshes on its existing polling interval; the API permits voting immediately once the meeting and applicant ballot are open. Results remain limited to executive board and current pledge committee members.
 
 ## Who can do what
 
@@ -58,7 +56,7 @@ Votes are private from other members, but they are attributable to the executive
 ## Running the meeting
 
 1. Open the Presentation tab under Rushee Data, then enter presentation mode. Executive board members use the admin portal; the pledge chair uses the member portal.
-2. Approve visibility with **Show Decision Night**, then ask members to open **Decision Night** in their portal and keep it open.
+2. Confirm **Start Round 1** in Decision Night Results, then ask members to open **Decision Night** in their portal and keep it open.
 3. Show the rushee you want to discuss. Press **Open voting** when ready. The compact button and duration field sit in the center of the presentation header, between the title and slide count/close button. On narrow screens they wrap below those controls within the header. The same control is available on the rushee's profile. Pledge committee members who are not chairs can edit content but do not receive these voting controls.
 4. The default duration is 60 seconds. Change it before opening if needed, from 15 to 300 seconds.
 5. Members choose Strong yes, Weak yes, Undecided, Weak no, or Strong no, then press **Submit vote**. They can change their choice and press **Update vote** until the deadline.
@@ -152,7 +150,7 @@ Edit mode retains all slides and saved content. A missing or empty saved discuss
 In **Committees > Pledge Committee > Decision Night Results**, managers use the meeting panel above the result tabs. Current pledge committee members can read results; only executive board and pledge chair see mutation controls.
 
 1. Under Voting rounds, close any active practice ballot. Select an unwanted closed ballot and use **Delete this ballot**, review its name/count, type `delete`, and confirm. Locked/completed phases are protected. Deleting a newer unlocked ballot can expose an earlier ballot for that candidate; no profile is removed. Old unassigned ballots are excluded from new meeting rankings even if retained.
-2. **Start Round 1** and confirm. The API captures the eligible roster. Enable **Show Decision Night** on the voting page when ready for members.
+2. **Start Round 1** and confirm. The API captures the eligible roster. Starting Round 1 automatically opens Decision Night to members.
 3. Open each applicant's timed vote from their presentation slide/profile. The request explicitly includes its meeting and phase; old requests cannot become Round 2 votes. A retry retains its request ID without extending the ballot.
 4. Return to results, close outstanding voting, then **Review and lock Round 1**. Review the full in/discussion/out lists before Confirm. Under Applicants awaiting votes, **Keep in discussion** explicitly defers a zero-vote applicant; it never places them in/out. Any change during review requires another review.
 5. **Start Round 2** and confirm. Open presentation decks automatically filter to the saved discussion group within their visible polling interval (about two seconds). Edit mode retains the full deck.
