@@ -20,7 +20,7 @@ Active pledge committee members and executive board members can open **Edit mode
 
 Existing plain-text write-ups supply the summary until a formatted summary is saved. Events attended is a read-only list of recorded attendance, using the same text size as the other profile details. Previously saved event-text overrides are ignored; changing attendance must use the attendance tools. Interview and committee sections are presentation-specific summaries; private interview notes are not copied onto the slide automatically. A saved empty section intentionally stays empty.
 
-Editing content does not grant permission to approve visibility, open voting, or see named results. Those controls remain restricted to executive board members and the pledge chair.
+Editing content does not grant permission to approve visibility or open voting. Management remains restricted to executive board members and the pledge chair. Current pledge committee members can read named results.
 
 **View resume** opens the existing protected file popup without leaving the slide. PDFs display inside the popup; unsupported formats offer a download. A missing resume is labeled clearly. Escape closes the popup without closing the slide, and slide navigation pauses while the popup is open.
 
@@ -30,7 +30,7 @@ Slides, editor controls and the voting timer follow the portal's light/dark them
 
 During an open voting round, eligible members can choose **Green flag** or **Red flag** beside their ballot, or leave both unset. Clicking the selected flag again or using **Clear flag** removes it. Each account has at most one flag per round; flags can change only while voting is open and Decision Night is visible. A flag is independent of the five-choice vote.
 
-The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and the pledge chair can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
+The projected slide checks totals about every two seconds. It shows green/red counts for that rushee's most recent round, including after the round closes, while Decision Night remains visible. Returning to an older slide cannot show another rushee's totals. Only totals are projected. Executive board members and current pledge committee members can see who submitted each flag on the restricted results page; ordinary members cannot load other people's flags or poll results. Opening another round for the same rushee starts a separate set of flags.
 
 ## Visibility approval
 
@@ -38,21 +38,22 @@ Decision Night starts hidden from ordinary members. An executive board member or
 
 **Hide Decision Night** removes member access and blocks new votes and opening rounds. It does not delete votes, close rounds, or reset deadlines. If shown again before an existing round expires, that round returns with its original deadline. Use the separate **Close voting now** action to end a round early.
 
-The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain restricted to executive board members and the pledge chair regardless of visibility.
+The setting is shared and stored in Postgres. The member sidebar checks visibility about every 15 seconds and on returning to the tab. Voting pages check about every two seconds; the API rejects hidden submissions immediately even if a page still shows an old ballot. Results remain available to executive board and current pledge committee members regardless of voting visibility.
 
 ## Who can do what
 
 | Person | Vote | Open or close voting | See results and voter names |
 | --- | --- | --- | --- |
-| Active member | Yes | No | No |
-| Committee chair | Yes | No | No |
+| Active member outside pledge committee | Yes | No | No |
+| Other committee chair | Yes | No | No |
+| Pledge committee member | Yes | No | Yes |
 | Pledge committee chair | Yes | Yes | Yes |
 | Executive board member | Yes | Yes | Yes |
 | Pledge, rushee, or alumnus | No | No | No |
 
 Voting requires an eligible JWT group and an eligible current database membership. Deleted accounts and test accounts cannot vote. A test account with executive-board membership in both its JWT and database record can view Decision Night, show/hide it, open/close rounds and inspect results. It receives no ballot or flag controls; the API rejects its vote and flag submissions. Other test accounts remain excluded. Management requires executive board membership in both places or the existing pledge committee chair assignment in Postgres. Being the chair of another committee does not grant management access.
 
-Votes are private from other members, but they are attributable to the executive board and the pledge chair. The API derives voter identity from the authenticated account. Ordinary member responses contain only that person's own selection. They never include other votes or totals. Private interview notes are not sent to the voting page.
+Votes are private from other members, but they are attributable to the executive board and the pledge committee. The API derives voter identity from the authenticated account. Ordinary member responses contain only that person's own selection. They never include other votes or totals. Private interview notes are not sent to the voting page.
 
 ## Running the meeting
 
@@ -68,9 +69,14 @@ Only one voting round can be open at a time. Opening the same rushee again after
 
 ## Reviewing results
 
-Executive board members and the pledge chair can follow **View voting results** from their Decision Night voting page. Choose a round and press Refresh to see current totals and attributed votes. The page lists the most recent 100 rounds; older rounds remain stored and accessible by their API ID. Results do not update automatically.
+Open **Committees > Pledge Committee > Decision Night Results** in the admin or member portal. Executive board and current pledge committee members can read the page; voting management remains executive-board/pledge-chair only. The tabs are:
 
-Keep this page off the projector: it contains names and choices. The presentation itself contains voting controls and the countdown, not individual votes. A manager can use **Close voting now** on the results page to end a round early.
+- **Voting rounds:** choose among the latest 100 stored rounds and refresh totals, named ballots and optional flags. Older rounds remain available by API ID. Only managers see Close voting now.
+- **Tier list:** latest closed-round weighted averages, ranks, counts, in/discuss/out projections and expandable answer breakdowns. Ties and insufficient votes stay protected. Refreshes every 15 seconds while visible.
+- **Results chart:** projected group sizes and a score histogram with accessible values. This does not represent saved final bids; final decisions and persisted first-round locking are not yet implemented.
+- **Simulation:** embedded synthetic rehearsal with PNM/member counts, adjustable distribution percentages, vote editing and simulated round locking. It never changes real votes. Switching hub tabs keeps the rehearsal; leaving the page resets it.
+
+Keep named results off the projector. The presentation itself shows voting controls/countdown and aggregate flags, not individual ballots. The website checks can_view_results independently from can_manage. Loss of committee membership revokes API reads and hides the hub when permissions refresh. The simulator iframe is sandboxed without same-origin access and contains synthetic data only.
 
 ## Timing and recovery
 
@@ -96,7 +102,7 @@ Before the meeting, rehearse with permitted accounts in a non-production environ
 
 The approved relative split is **25% in / 35% discussion / 40% out**. For 60 PNMs this targets **15 in, 21 discussion, 24 out**. Average ballot weights are Strong yes +1, Weak yes +0.5, Undecided 0, Weak no -0.5, Strong no -1. Placement in the in/out groups requires at least 28 votes, based on an expected minimum of 35 voters. In/out counts round down; discussion receives the remainder. Boundary ties and low-turnout tie groups stay together in discussion, with no backfilling. Discussion can therefore exceed 35%.
 
-Manager-only `GET /decision-night/rankings` provides a latest-closed-round preview, incomplete if anyone has no ballots or voting is active. The default minimum is 28; the optional minimum_votes query may raise it. The preview does not persist decisions or award bids. No migration is required. No new member access to results is granted.
+Executive-board/pledge-committee `GET /decision-night/rankings` provides a latest-closed-round preview, incomplete if anyone has no ballots or voting is active. The default minimum is 28; the optional minimum_votes query may raise it. The preview does not persist decisions or award bids. No migration is required. Ordinary members outside the pledge committee do not gain access.
 
 ### Try the interactive simulation
 
@@ -110,4 +116,4 @@ In the ktp-api repository, open `docs/simulations/decision-night-simulator.html`
 
 This simulation contains no real applicants, makes no network calls, and changes no portal data. It uses the same scoring source as the API. Rebuild with `node scripts/build-decision-night-simulator.js` after source changes. Deterministic CLI scenarios are available through `node scripts/simulate-decision-night.js`; report: `docs/simulations/decision-night-25-35-40/decision-night-simulation.md` in ktp-api.
 
-**Still required for production:** persisted confirmation/locking of first-round groups and source ballots, a second-round queue excluding locked in/out applicants, website controls, and a non-production browser rehearsal. The local simulator's lock is not an implemented production lock. A 25-33-person class remains a committee decision; with 15 confirmed in, another 10-18 would be selected from discussion.
+**Still required for production:** persisted confirmation/locking of first-round groups and source ballots, a second-round queue excluding locked in/out applicants, confirmed-decision controls, and a non-production browser rehearsal. The results hub and embedded offline simulator are implemented. The local simulator's lock is not an implemented production lock. A 25-33-person class remains a committee decision; with 15 confirmed in, another 10-18 would be selected from discussion.

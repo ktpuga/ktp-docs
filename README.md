@@ -40,3 +40,5 @@ One gotcha documented there and worth repeating: Dokploy regenerates `/etc/traef
 Attendance troubleshooting is documented in docs/api/endpoints.md (correlated attempt records) and docs/website/sign-in.md (writable cookie persistence). Update these with changes to the API or attendance actions; the historical incident remains unconfirmed pending production evidence.
 
 Decision Night documentation now includes the approved 25/35/40 distribution preview, 28-vote minimum, interactive offline rehearsal and reproducible synthetic simulations, and the remaining first-round lock/second-round workflow steps. See `docs/website/decision-night.md`.
+
+Decision Night now has a Pledge Committee results hub with round details, tiers, projected charts and embedded simulation. Current committee members may read named results; management permissions remain unchanged. Deploy the API read-permission update before the website.
