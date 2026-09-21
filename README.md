@@ -38,3 +38,5 @@ The site runs in Docker on the **Dokploy VM (10.0.0.7)** and is **rebuilt and re
 One gotcha documented there and worth repeating: Dokploy regenerates `/etc/traefik/config/dokploy-domains.yml` itself, so hand-edits to that file get silently reverted. Custom Traefik middleware belongs either in Dokploy's own per-app config UI or in a separate dynamic config file it doesn't manage.
 
 Attendance troubleshooting is documented in docs/api/endpoints.md (correlated attempt records) and docs/website/sign-in.md (writable cookie persistence). Update these with changes to the API or attendance actions; the historical incident remains unconfirmed pending production evidence.
+
+Decision Night documentation now includes the approved 25/35/40 distribution preview, 28-vote minimum, interactive offline rehearsal and reproducible synthetic simulations, and the remaining first-round lock/second-round workflow steps. See `docs/website/decision-night.md`.

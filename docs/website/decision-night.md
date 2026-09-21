@@ -91,3 +91,23 @@ Also apply `1791300000000_add-presentation-sections.sql` and `1791400000000_add-
 Run the API suite against the existing isolated test database. Website coverage is in `scripts/test-decision-night.cjs` and `scripts/test-decision-slides.cjs`, included in the standard auth CI step. Tests cover permissions, private responses, duplicate submissions, concurrent opening, requests delayed beyond expiry, browser candidate changes and the website proxy's origin check.
 
 Before the meeting, rehearse with permitted accounts in a non-production environment: open a round, vote, change a vote, let it expire, open the next rushee, and inspect results as both a manager and an ordinary member. Do not create test votes in the real meeting's records.
+
+## Distribution simulation and upcoming two-round workflow
+
+The approved relative split is **25% in / 35% discussion / 40% out**. For 60 PNMs this targets **15 in, 21 discussion, 24 out**. Average ballot weights are Strong yes +1, Weak yes +0.5, Undecided 0, Weak no -0.5, Strong no -1. Placement in the in/out groups requires at least 28 votes, based on an expected minimum of 35 voters. In/out counts round down; discussion receives the remainder. Boundary ties and low-turnout tie groups stay together in discussion, with no backfilling. Discussion can therefore exceed 35%.
+
+Manager-only `GET /decision-night/rankings` provides a latest-closed-round preview, incomplete if anyone has no ballots or voting is active. The default minimum is 28; the optional minimum_votes query may raise it. The preview does not persist decisions or award bids. No migration is required. No new member access to results is granted.
+
+### Try the interactive simulation
+
+In the ktp-api repository, open `docs/simulations/decision-night-simulator.html` in a browser. It is self-contained and works offline.
+
+1. Set the PNM and member counts, then start a new scenario (defaults: 60/35). Try tie, low-turnout, identical-score and missing-vote presets. Change the in/discussion/out percentages and use Apply distribution to keep the same votes while comparing splits. Whole percentages must total 100; these overrides affect the simulation only.
+2. Select an applicant or click their name, edit the five vote counts and apply them. Check the 27-versus-28-vote behavior or mark voting still open.
+3. Confirm round one to freeze its synthetic groups. The second-round queue contains only discussion candidates.
+4. Generate second-round votes or edit ballots individually. The original in/out groups remain fixed, and first-round averages stay visible.
+5. Start a new scenario to reset. Percentage controls stay locked during round two. Reloading clears the rehearsal.
+
+This simulation contains no real applicants, makes no network calls, and changes no portal data. It uses the same scoring source as the API. Rebuild with `node scripts/build-decision-night-simulator.js` after source changes. Deterministic CLI scenarios are available through `node scripts/simulate-decision-night.js`; report: `docs/simulations/decision-night-25-35-40/decision-night-simulation.md` in ktp-api.
+
+**Still required for production:** persisted confirmation/locking of first-round groups and source ballots, a second-round queue excluding locked in/out applicants, website controls, and a non-production browser rehearsal. The local simulator's lock is not an implemented production lock. A 25-33-person class remains a committee decision; with 15 confirmed in, another 10-18 would be selected from discussion.
