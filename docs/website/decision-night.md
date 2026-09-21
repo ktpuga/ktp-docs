@@ -73,7 +73,7 @@ Open **Committees > Pledge Committee > Decision Night Results** in the admin or 
 
 - **Voting rounds:** choose among the latest 100 stored rounds and refresh totals, named ballots and optional flags. Older rounds remain available by API ID. Only managers see Close voting now.
 - **Tier list:** latest closed-round weighted averages, ranks, counts, in/discuss/out projections and expandable answer breakdowns. Ties and insufficient votes stay protected. Refreshes every 15 seconds while visible.
-- **Results chart:** projected group sizes and a score histogram with accessible values. This does not represent saved final bids; final decisions and persisted first-round locking are not yet implemented.
+- **Results chart:** projected group sizes and a score histogram with accessible values. This does not represent saved final bids; final bid decisions are not implemented. First-round review and locking are available in the meeting panel.
 - **Simulation:** embedded synthetic rehearsal with PNM/member counts, adjustable distribution percentages, vote editing and simulated round locking. It never changes real votes. Switching hub tabs keeps the rehearsal; leaving the page resets it.
 
 Keep named results off the projector. The presentation itself shows voting controls/countdown and aggregate flags, not individual ballots. The website checks can_view_results independently from can_manage. Loss of committee membership revokes API reads and hides the hub when permissions refresh. The simulator iframe is sandboxed without same-origin access and contains synthetic data only.
@@ -102,7 +102,7 @@ Before the meeting, rehearse with permitted accounts in a non-production environ
 
 The approved relative split is **25% in / 35% discussion / 40% out**. For 60 PNMs this targets **15 in, 21 discussion, 24 out**. Average ballot weights are Strong yes +1, Weak yes +0.5, Undecided 0, Weak no -0.5, Strong no -1. Placement in the in/out groups requires at least 28 votes, based on an expected minimum of 35 voters. In/out counts round down; discussion receives the remainder. Boundary ties and low-turnout tie groups stay together in discussion, with no backfilling. Discussion can therefore exceed 35%.
 
-Executive-board/pledge-committee `GET /decision-night/rankings` provides a latest-closed-round preview, incomplete if anyone has no ballots or voting is active. The default minimum is 28; the optional minimum_votes query may raise it. The preview does not persist decisions or award bids. No migration is required. Ordinary members outside the pledge committee do not gain access.
+Executive-board/pledge-committee `GET /decision-night/rankings` now scopes results to the latest meeting and phase. Unassigned practice ballots are excluded. The minimum is fixed at 28; missing ballots require explicit manager deferral before locking. Once locked, first-round groups are frozen. No bids are awarded. Apply the migration and coordinated website update described below. Ordinary members outside the pledge committee do not gain access.
 
 ### Try the interactive simulation
 
@@ -116,4 +116,52 @@ In the ktp-api repository, open `docs/simulations/decision-night-simulator.html`
 
 This simulation contains no real applicants, makes no network calls, and changes no portal data. It uses the same scoring source as the API. Rebuild with `node scripts/build-decision-night-simulator.js` after source changes. Deterministic CLI scenarios are available through `node scripts/simulate-decision-night.js`; report: `docs/simulations/decision-night-25-35-40/decision-night-simulation.md` in ktp-api.
 
-**Still required for production:** persisted confirmation/locking of first-round groups and source ballots, a second-round queue excluding locked in/out applicants, confirmed-decision controls, and a non-production browser rehearsal. The results hub and embedded offline simulator are implemented. The local simulator's lock is not an implemented production lock. A 25-33-person class remains a committee decision; with 15 confirmed in, another 10-18 would be selected from discussion.
+**Remaining validation:** rehearse the coordinated deployment with test accounts in non-production. Final bid decisions remain a separate committee decision; no automatic bid awards are implemented. The meeting lock and phase-separated ballots are implemented in the API checkpoint below. The simulator remains synthetic and independent of production. A 25-33-person class remains a committee decision; with 15 confirmed in, another 10-18 would be selected from discussion.
+
+## Explicit meeting phases and test-ballot deletion
+
+Apply migration `1792200000000_decision-night-meeting-phases.sql` before deploying the matching API and website changes together. It preserves existing ballots as unassigned history. The migration refuses rollback once meetings or deletion records exist. Do not manually assign old practice votes to a meeting.
+
+All routes below are under `/decision-night`. Results readers are executive board and current pledge committee; only executive board and pledge chair manage meetings.
+
+| Method and route | Required body / behavior |
+| --- | --- |
+| GET /meeting | Results readers; latest meeting, first-round preview or snapshot, second-round averages and progress. |
+| POST /meetings | Manager; request_id UUID. Idempotently start Round 1 with a fixed eligible roster. Close old active ballots first. |
+| POST /rounds | Existing fields plus meeting_id integer and phase 1 or 2, explicitly captured by the caller. Stale phases are rejected. |
+| POST /meetings/:id/candidates/:candidateId/defer | confirm: discussion. Explicitly keep a zero-vote applicant in discussion. Opening their Round 1 ballot clears deferral. |
+| POST /meetings/:id/lock-round-one | confirm: lock and review_token from GET /meeting or /rankings. All ballots must be closed; missing votes require explicit deferral. Changed results require fresh review. |
+| POST /meetings/:id/start-round-two | confirm: start. Requires locked Round 1; only its saved discussion group can receive ballots. |
+| POST /meetings/:id/complete | confirm: complete. No active ballot; saves Round 2 averages, preserving unvoted applicants as unranked. Does not award bids. |
+| DELETE /rounds/:id | confirm: delete and expected_vote_count integer. Removes votes/flags from that closed ballot only. A retained deletion record prevents old request IDs from recreating it. |
+
+Opening, voting, flags, closing, phase changes and deletion share a database lock. The API checks the phase and deadline after acquiring it, so delayed submissions cannot cross phases. Locked first-round data includes candidate IDs/names, source ballot IDs, vote breakdowns, averages, groups, policy and review token. Round 2 never recomputes it. Reopening a candidate in the same phase creates a new ballot; the latest closed ballot replaces that phase's score, without adding earlier ballots together.
+
+Deletion refuses open ballots, changed counts, and any ballot in a locked/completed phase. Old unassigned test ballots remain deletable after closure. Deleting a latest ballot in an unlocked phase can reveal the previous closed ballot for that candidate; review rankings again before locking. No user profile or Authentik account is deleted. Lists/results omit deleted ballots. Ordinary member voting responses never contain meeting snapshots or other members' votes.
+
+Tests: `test/decisionMeeting.test.js`, `test/decisionNight.test.js`, `test/decisionNightRanking.test.js`, plus the existing distribution/simulator tests and full API suite. No live votes have been deleted by this implementation.
+
+### Round 2 presentation roster
+
+When the meeting enters Round 2, the presentation list and open slide rotation show only candidate IDs in the saved Round 1 discussion group. The website checks meeting state every two seconds while visible and refreshes when the tab regains visibility. If the selected candidate leaves the rotation, the deck displays the first remaining candidate; otherwise selection stays on the same person. Slide counts and keyboard navigation use the filtered list. Completed meetings retain this discussion-only view.
+
+Edit mode retains all slides and saved content. A missing or empty saved discussion list produces an empty presentation, never a fallback to the full roster. Failed meeting reads pause presentation with an error until a successful refresh. This filtering depends on the meeting API migration; the website Start Round 2 and review/lock controls are in the results page meeting panel.
+
+## Running the two-round meeting
+
+In **Committees > Pledge Committee > Decision Night Results**, managers use the meeting panel above the result tabs. Current pledge committee members can read results; only executive board and pledge chair see mutation controls.
+
+1. Under Voting rounds, close any active practice ballot. Select an unwanted closed ballot and use **Delete this ballot**, review its name/count, type `delete`, and confirm. Locked/completed phases are protected. Deleting a newer unlocked ballot can expose an earlier ballot for that candidate; no profile is removed. Old unassigned ballots are excluded from new meeting rankings even if retained.
+2. **Start Round 1** and confirm. The API captures the eligible roster. Enable **Show Decision Night** on the voting page when ready for members.
+3. Open each applicant's timed vote from their presentation slide/profile. The request explicitly includes its meeting and phase; old requests cannot become Round 2 votes. A retry retains its request ID without extending the ballot.
+4. Return to results, close outstanding voting, then **Review and lock Round 1**. Review the full in/discussion/out lists before Confirm. Under Applicants awaiting votes, **Keep in discussion** explicitly defers a zero-vote applicant; it never places them in/out. Any change during review requires another review.
+5. **Start Round 2** and confirm. Open presentation decks automatically filter to the saved discussion group within their visible polling interval (about two seconds). Edit mode retains the full deck.
+6. Open each discussion applicant's Round 2 ballot. The Tier list defaults to Round 2 and shows its scores separately with original Round 1 averages. Switch to **Round 1 (locked)** to inspect the original groups.
+7. Close active voting, then **Review and complete Round 2** and confirm. Missing votes stay unranked. Completing does not award bids, choose a final class, or change accounts.
+
+The meeting panel polls every two seconds while visible and ten seconds when hidden. The browser proxy only forwards allowlisted routes, protects all POST/PUT/DELETE requests with same-origin checks, and keeps API credentials server-side. Private meeting results are not returned to ordinary voters. Tests in scripts/test-decision-night.cjs cover confirmations, original review tokens, explicit phases, request reuse, separate rankings and deletion. Rehearse with test accounts in a non-production environment before using live voting; the embedded simulator remains synthetic only.
+
+
+## Adjustable slide columns
+
+The main slide text is Short bio + rush summary on the left and Interview notes on the right, beside the profile/attendance sidebar. Pledge committee notes have been removed from presentation and edit mode; stored notes are retained. On desktop, drag the vertical divider in presentation mode to change widths. Focus it and use arrow keys for keyboard adjustment; double-click resets to 55/45. Both columns keep at least 25% of the text area. The split remains while moving between candidates in the open presentation. Small screens stack the sections.
