@@ -715,12 +715,20 @@ Returns the decision-night deck, ordered by display name:
 ]
 ```
 
-`interviewers` names the members who wrote an interview note about that rushee, for
-the slide heading. Deduplicated and sorted, across every round including archived
-ones, and `[]` when nobody has written about them yet. It is attribution only: no
-note body is in this response, which the deck tests assert directly. A member whose
-account was later deleted keeps their name through the denormalized `author_name`
-copy on `interview_notes`. This adds no new access, because the endpoint is already
+`interviewers` names everyone who interviewed that rushee, for the slide heading. It
+unions two sources: members who wrote an interview note, and members who signed up
+for a slot the rushee booked. The second catches an interviewer who sat in and wrote
+nothing. Deduplicated and sorted, across every round including archived ones, and
+`[]` when there are none.
+
+The signup source is exact for a one-seat slot, which is the default. A slot opened
+to several seats reports every interviewer on that block for every rushee on it,
+because the interviewer-to-rushee pairing is not recorded anywhere.
+
+Attribution only: no note body is in this response, which the deck tests assert
+directly. A deleted account keeps its name on the note branch through the
+denormalized `author_name` copy, but not on the signup branch, where the row is
+removed by cascade. This adds no new access, because the endpoint is already
 restricted to eboard and the pledge committee, who can read the notes themselves.
 
 `findDeck` starts from `users` and left-joins the write-up. Rushees without notes or an interview booking still appear. A missing `presentation_body` is null, not an empty string, and the new editor can use it as the summary fallback.
