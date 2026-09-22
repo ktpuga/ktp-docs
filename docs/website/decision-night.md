@@ -20,6 +20,10 @@ Active pledge committee members and executive board members can open **Edit mode
 
 Existing plain-text write-ups supply the summary until a formatted summary is saved. Events attended is a read-only list of recorded attendance, using the same text size as the other profile details. Previously saved event-text overrides are ignored; changing attendance must use the attendance tools. Interview and committee sections are presentation-specific summaries; private interview notes are not copied onto the slide automatically. A saved empty section intentionally stays empty.
 
+Text colour and dark mode. The section editor lets an author set a text colour, and text pasted from Google Docs or Word usually arrives carrying one. In dark mode a slide measures each of those colours against the dark background and shows the theme's normal text colour instead of any that would be too faint to read from across the room. Colours that are readable are kept, so a deliberate highlight still stands out. Light mode shows every colour exactly as it was saved.
+
+Two things are worth knowing before a meeting. A dark colour chosen on purpose, such as a dark red, is also replaced in dark mode, because the test is whether it can be read rather than whether it was intended. And nothing about the saved section changes: switch the theme back to light and the original colour is there again. Editing a section always shows the true saved colours in both themes, so what is typed is what is stored.
+
 Editing content does not grant permission to approve visibility or open voting. Management remains restricted to executive board members and the pledge chair. Current pledge committee members can read named results.
 
 **View resume** opens the existing protected file popup without leaving the slide. PDFs display inside the popup; unsupported formats offer a download. A missing resume is labeled clearly. Escape closes the popup without closing the slide, and slide navigation pauses while the popup is open.
