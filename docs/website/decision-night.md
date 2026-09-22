@@ -191,3 +191,9 @@ The simulator now follows the portal light/dark setting, including cards, inputs
 ### Merge saved committee presentation text into summary
 
 Apply API migration `1792400000000_merge-committee-presentation-summary.sql` to append existing curated committee slide text to the same short bio/rush summary field. It preserves existing rich summary text or safely escapes the legacy plain-text summary, respects intentionally cleared summaries, and retains original committee rows for recovery. Matching text is not appended twice. The presentation remains two columns with one summary editor on the left and interview notes on the right. Private interview evaluations are not copied. The migration refuses automatic rollback to protect subsequent edits.
+
+### Round 1 class-year estimates
+
+After Round 1 is locked, meeting controls show the autobid/In group's estimated freshman, sophomore, junior and senior counts, plus Other and Unknown. These remain visible during Round 2 and use only locked Round 1 In candidates, not discussion candidates. This display does not issue bids. Estimates use graduation dates relative to the meeting start date in America/New_York, with an August academic-year boundary; year-only graduation values assume spring. Unrecognized or missing dates count as Unknown.
+
+New Round 1 snapshots preserve graduation dates. Older locked snapshots without the field fall back to current profile graduation dates; group membership stays frozen. No migration is required for this feature. Deploy the API before the website.

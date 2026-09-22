@@ -46,3 +46,9 @@ Decision Night now has a Pledge Committee results hub with round details, tiers,
 ### Decision Night simulation themes
 
 The simulator now follows the portal light/dark setting, including cards, inputs, tables, selected rows, and group badges. Switching themes updates the sandboxed iframe without reloading or losing synthetic votes/settings. Standalone simulator files follow the system theme by default and accept `?theme=light` or `?theme=dark`. Theme messages carry no private data and are accepted only from the parent frame. Edit the API simulator template, rebuild with `node scripts/build-decision-night-simulator.js`, and copy its output to the website public simulator to keep both artifacts synchronized.
+
+### Archived interview rounds
+
+Under **Interviews > Set Up**, managers (executive board and pledge chair) can Archive a round, switch between Active and Archived lists, and open archived rounds to read their slots, booked applicants, interviewers and saved notes. Restore returns a round to the Active list as an unpublished draft; publishing remains explicit. Archive hides the round from rushee/interviewer signup lists and blocks new claims while retaining bookings, staffing, notes and candidate interview history. Existing note-access rules remain unchanged; the archive browser does not add permissions to private notes.
+
+Apply migration `1792500000000_archive-interview-rounds.sql` before deploying API and website. Management API: `GET /interviews/schedules?archived=true` and `POST /interviews/schedules/:id/archive` with `{archived:true}` or `{archived:false}`. Archived scheduling edits require restoration. This retains records in the main database; it is separate from deleted-account archive storage. No actual rounds were archived during development.
