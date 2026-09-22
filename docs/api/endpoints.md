@@ -709,10 +709,19 @@ Returns the decision-night deck, ordered by display name:
     "graduation_date": "Spring 2028",
     "heard_from": "...",
     "presentation_body": null,
-    "presentation_updated_at": null
+    "presentation_updated_at": null,
+    "interviewers": ["Ch Air", "Cmte Ember"]
   }
 ]
 ```
+
+`interviewers` names the members who wrote an interview note about that rushee, for
+the slide heading. Deduplicated and sorted, across every round including archived
+ones, and `[]` when nobody has written about them yet. It is attribution only: no
+note body is in this response, which the deck tests assert directly. A member whose
+account was later deleted keeps their name through the denormalized `author_name`
+copy on `interview_notes`. This adds no new access, because the endpoint is already
+restricted to eboard and the pledge committee, who can read the notes themselves.
 
 `findDeck` starts from `users` and left-joins the write-up. Rushees without notes or an interview booking still appear. A missing `presentation_body` is null, not an empty string, and the new editor can use it as the summary fallback.
 
