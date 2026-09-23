@@ -650,6 +650,53 @@ Every committee response includes `slug`, so members can see the assignment on t
 
 ---
 
+## Discord committee roles
+
+A committee may be mapped to exactly one Discord role. A bot polls the API and makes the chapter server match it. The API is the source of truth; the bot never decides who is approved.
+
+Migration `1792800000000` adds `committee_discord_roles` (one row per committee, `discord_role_id` unique, constrained to 10 to 32 digits) and `discord_role_sync_jobs`.
+
+**Every committee read LEFT JOINs `committee_discord_roles`**, so `findById` and `findAllForUser` both return `discord_role_id`. A test fixture that builds its own `committees` table must create this one too, or every committee query in that file fails with `relation "committee_discord_roles" does not exist`.
+
+### `PUT /committees/:id/discord-role`
+
+**Eboard only.** Body `{ discord_role_id }`, a Discord snowflake as a string. Remapping enqueues a `revoke` for the previous role and a `grant` for the new one, for every linked member of that committee. Answers `409` when that role is already mapped to another committee.
+
+### `DELETE /committees/:id/discord-role`
+
+**Eboard only.** Clears the mapping and enqueues a `revoke` for every linked member. Answers `204`.
+
+### `GET /discord/role-sync/jobs?status=pending`
+
+**Bot only**, authenticated by `X-Bot-Secret` rather than a bearer token. Oldest first, capped at 100. Any `status` other than `pending` is a `400`.
+
+### `GET /discord/role-sync/assignments`
+
+**Bot only.** The complete desired membership of every mapped role, as `[{ discord_role_id, discord_user_ids }]`. Only members with a linked Discord account and a live user row appear.
+
+An empty `discord_user_ids` is meaningful: it means nobody should hold that role, not that there is no data. A role absent from this response is never inspected or changed, which is what keeps unrelated server roles safe.
+
+This is the endpoint to curl when somebody reports a missing role. If their Discord ID is absent from it, the API does not believe they should have the role, and the cause is upstream: no `committee_members` row, no linked Discord account, or no mapping on that committee.
+
+### `POST /discord/role-sync/jobs/:id/complete`
+
+**Bot only.** Answers `204`, or `404` when the job is not pending.
+
+### `POST /discord/role-sync/jobs/:id/fail`
+
+**Bot only.** Body `{ error }`, truncated to 500 characters. Increments `attempts` and leaves the job pending, because the bot's operations are idempotent: adding a role already held and removing one already absent are both safe retries.
+
+### Reconciliation
+
+Jobs are one-shot. Reconciliation is the only self-healing part of the system: on every poll the bot makes each mapped role match the assignments response, granting the role to approved members who lack it as well as removing it from holders who are not approved.
+
+**Until 2026-09-23 it only removed.** Drift could therefore resolve in one direction only, and a member whose Discord account was linked could be left without their role permanently, because a grant that was never enqueued or that failed after its job was marked complete was repaired by nothing. Reported as a bug by a member in exactly that state.
+
+The bot reads the assignments **after** applying the pending jobs, never alongside them. Reading both up front lets a membership committing between the two reads hand reconciliation a picture older than the grant it then undoes, with that job already marked complete and so never retried.
+
+Two Discord-side requirements are easy to miss and produce silent no-ops: the bot's own highest role must sit above every committee role it manages, and the Server Members Intent must be enabled.
+
+---
 ## Rushee interest form data
 
 Rushees enter their interest-form answers in the profile builder. These endpoints provide the committee's table, individual profiles, and decision-night presentation.
