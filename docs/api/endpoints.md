@@ -1574,7 +1574,18 @@ Returns the admin user list, including profile fields needed by the edit form. D
 
 ### `PUT /admin/users/:authentikId/group`
 
-Accepts `group`: `eboard`, `chair`, `active`, `alumni`, or `pledge`. Changes the role in Authentik, removing other role groups, then updates `users.member_group`. See [Changing a member's group](./overview.md#eboard-changing-a-members-group) for required Authentik setup.
+Accepts `group`: `eboard`, `chair`, `active`, `inactive`, `alumni`, `pledge`, or `rush` (the full `constants/roleGroups.js` list). Changes the role in Authentik, removing other role groups, then updates `users.member_group`. See [Changing a member's group](./overview.md#eboard-changing-a-members-group) for required Authentik setup.
+
+Four distinct refusals, which matter because they need four different people to do four different things:
+
+| Status | Meaning | Who fixes it |
+| --- | --- | --- |
+| `400` | The group is not in `roleGroups.js` | Caller sent a bad value |
+| `404` | The member has no `authentik_pk`, so they have never signed in | The member, by signing in once |
+| `500` | An Authentik group of that name does not exist | Whoever administers Authentik, by creating it |
+| `502` | Authentik could not be reached, or refused the change | Infrastructure, or the service account's permissions |
+
+All four log to the API with an `[updateUserGroup]` prefix; the `500` also logs the group names that DO exist, so the fix does not need a second look. Nothing is written to `users.member_group` unless the Authentik change succeeded first.
 
 ### `GET /admin/exec-roles`
 

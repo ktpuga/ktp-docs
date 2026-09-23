@@ -341,6 +341,10 @@ Domain-specific rules live in `services/urls.js`, `services/emails.js`, and `ser
 
 The documented service account is `ktp-api-service`. It needs permissions to view users and view, add users to, and remove users from the managed role groups. See [API Tokens / Service Accounts](../authentik/overview.md#api-tokens--service-accounts) for setup.
 
+**Every role group must exist in Authentik by that exact name.** Nothing in `ktp-api` creates them. A group listed in `constants/roleGroups.js` and offered by the website's Move to picker, but never created in Authentik, produces `500 Authentik group "<name>" does not exist` on every attempt to move somebody into it. That is configuration, not a code fault, and the API log names the groups that do exist alongside it. A group that exists but that the service account cannot modify fails differently, as a `502`.
+
+If a move fails, read the API log line beginning `[updateUserGroup]`. It distinguishes all four refusals; the website shows the same sentence on the member's card.
+
 ## Environment Variables
 
 The documented deployment keeps environment settings in `/opt/ktp-api/.env` on LXC 119. Core settings:
