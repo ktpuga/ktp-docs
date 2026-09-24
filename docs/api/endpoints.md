@@ -852,6 +852,61 @@ There is one write-up per candidate. Repeated saves update it, and the last save
 
 **Executive board or any pledge committee member.** Clears the write-up. Returns `204`, or `404` when none exists. Use this endpoint to clear it instead of saving an empty string.
 
+### `PUT /rush-data/:id/bid`
+
+**Eboard or the pledge chair**, deliberately narrower than the rest of this section. Recording an interview is bookkeeping; a bid decides who stays, and it decides whose account the bulk removal tool offers to delete.
+
+Accepts `{ status, version }`. `status` is `extended`, `accepted`, `declined`, or `null` to withdraw. `version` is the one the caller read; a mismatch answers `409` telling them to reload rather than letting the later click win. A rushee with no bid is version `0`.
+
+Withdrawing (`null`) DELETES the row and is not the same as `declined`. Withdrawn means the offer should never have been made and reads afterwards as though it never was. Declined is a fact about the rushee: "we offered and they said no" and "we never offered" are different answers to whether the chapter would talk to them again, and that distinction is the whole reason `rushee_bids` is a table rather than a timestamp column.
+
+Added by migration `1792900000000`. One row per rushee, enforced by the primary key. `extended_at` and `extended_by` describe the OFFER and are preserved when a bid is later accepted or declined; `decided_at` is null while it is outstanding. The offerer's name is stored beside their id so the record survives their account being deleted.
+
+Every rushee row returned by `GET /rush-data` now carries `bid`, either null or `{ status, extended_at, decided_at, version, extended_by_name }`.
+
+### `GET /rush-data/archive-unbooked`
+
+**Eboard or the pledge chair.** Rushees eligible for bulk removal. `?category=` selects the rule:
+
+| Category | Eligible |
+| --- | --- |
+| `no_interview` (default) | Never booked an interview and never completed one. |
+| `no_bid` | Was not offered a bid, or declined one. Reaches people who DID interview. |
+
+Omitting the category means `no_interview`, so a website deployed before this change keeps working while the push-deployed API runs ahead of it.
+
+Returns `{ category, counts, candidates }`. `counts` covers BOTH categories from the one read, so the picker can label each option without a second round trip and the counts cannot disagree with the list beneath them.
+
+**A live bid protects a rushee from BOTH categories, not only from `no_bid`.** Someone can hold an offer without ever booking an interview, and deleting a person the chapter has just offered a place to is the worst thing this tool can do. A declined bid is not a live bid.
+
+A removal already pending under a different reason is excluded: finishing it here would relabel why that person was removed.
+
+### `POST /rush-data/archive-unbooked`
+
+**Eboard or the pledge chair.** Accepts `{ candidate_ids, confirm: "archive", category }`, 1 to 10 ids per call. Returns `{ results }` with `removed`, `skipped` or `failed` per id.
+
+The category picks the removal reason stored on `account_removals` (`rush_no_interview_booking` or `rush_no_bid`) and the guard applied inside `accountRemoval.removeAccount`. That guard re-reads the live row under the same advisory lock the bid write takes, so a bid extended between preview and confirm STOPS the deletion rather than losing to a stale review list.
+
+WARNING: the profile, rush history, interview notes and bid are archived and confirmed BEFORE the Authentik account is deleted. A broken archive database costs you removals, never profiles: `archiveUser` returning falsy answers `502` with nothing removed.
+
+### `GET /rush-data/archive`
+
+**Eboard or any pledge committee member.** Archived rushees, newest first, without `rush_history`.
+
+Outside `/admin` on purpose. `proxy.ts` refuses the pledge chair every `/admin` route, and they create most of these records and need to answer "has this person rushed before".
+
+**NARROWER than `GET /admin/archive`**: only people whose `member_group` was `rush` when they were archived. The archive also holds graduated members and former eboard, whose profiles have nothing to do with running rush.
+
+Answers `503` naming `ARCHIVE_DATABASE_URL` when the archive is not configured, and `502` when it cannot be reached. Those are deliberately different from an empty list: an unreachable archive and an empty one look identical to a reader and mean opposite things.
+
+### `GET /rush-data/archive/:id`
+
+**Eboard or any pledge committee member.** One archived rushee including `rush_history`: events attended, interviews, **interview notes**, the bid outcome, and the profile snapshot.
+
+The interview notes are the reason this route exists. Once a rushee is removed they live nowhere else, and the archived interview round cannot show them because the person they were written about no longer exists.
+
+An archived NON-rushee answers `404`, the same as a record that does not exist, so guessing an id is not a way around the narrowing on the list.
+
 ---
 
 ## Contact sheet
@@ -903,6 +958,10 @@ Responses include `X-Content-Type-Options: nosniff` and `Content-Security-Policy
 ## Interviews
 
 Interview rounds contain slots for candidates and interviewers. The router requires authentication and a rush-accessible group, with additional permissions on individual routes. See [Interviews](../website/interviews.md) for the full workflow.
+
+Archived rounds are soft-flagged with `interview_schedules.archived_at` and stay in the live database. They are frozen rather than moved: every write to one answers `409` with `code: "interview_archived"`. This is a DIFFERENT mechanism from user archiving, which copies rows into a separate database and deletes the originals.
+
+`GET /interviews/interviewer-schedules?archived=true` returns the closed rounds instead of the open ones, under the SAME eligibility rules. A pledge committee member therefore keeps seeing the rounds their committee was selected to staff, and managers see all of them. The two sets are never mixed: a list holding both would put claimable slots beside slots that silently refuse, distinguishable only by a badge.
 
 Candidate bookings and interviewer assignments have separate limits:
 
